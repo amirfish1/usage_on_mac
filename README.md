@@ -1,6 +1,6 @@
 # Claude Usage — macOS Menu Bar
 
-A pair of [SwiftBar](https://swiftbar.app) plugins that sit in your macOS menu bar:
+A pair of [xbar](https://xbarapp.com) plugins that sit in your macOS menu bar:
 
 - **`claude-usage.5m.py`** — shows your real Anthropic Pro/Max weekly usage %, 5-hour session %, and a pace indicator (are you on track to stay under limits this week?). Pulls live data straight from the same endpoint that powers [claude.ai/settings/usage](https://claude.ai/settings/usage).
 - **`mac-health.1m.py`** — system load, memory pressure, and a zombie-process watchdog (flags leaked MCP servers, orphaned `claude` CLI sessions, etc.).
@@ -43,7 +43,7 @@ Active sessions: 3 · 1 need /compact
 ## Requirements
 
 - macOS 12+
-- [SwiftBar](https://swiftbar.app) — `brew install --cask swiftbar`
+- [xbar](https://xbarapp.com) — `brew install --cask xbar`
 - **Google Chrome Beta** with a `claude.ai` tab open and logged in
 - Python 3 (comes with macOS)
 
@@ -57,21 +57,34 @@ Active sessions: 3 · 1 need /compact
 # 1. Clone
 git clone https://github.com/amirfish1/usage_on_mac.git ~/dev/usage_on_mac
 
-# 2. Tell SwiftBar where to find plugins
-defaults write com.ameba.SwiftBar PluginDirectory -string "$HOME/dev/usage_on_mac"
+# 2. Install xbar (if you haven't)
+brew install --cask xbar
 
-# 3. Install SwiftBar (if you haven't)
-brew install --cask swiftbar
+# 3. Drop wrapper scripts into xbar's plugin directory.
+#    The wrappers exec the .py files from the repo and strip the
+#    SwiftBar-style dark/light color and font hints that xbar doesn't parse.
+mkdir -p "$HOME/Library/Application Support/xbar/plugins"
+cat > "$HOME/Library/Application Support/xbar/plugins/claude-usage.5m.sh" <<'EOF'
+#!/bin/bash
+exec "$HOME/dev/usage_on_mac/claude-usage.5m.py" "$@" | sed -E 's/(color=#[a-fA-F0-9]+),#[a-fA-F0-9]+/\1/g; s/(font=[^,| ]+),[^| ]+/\1/g'
+EOF
+cat > "$HOME/Library/Application Support/xbar/plugins/mac-health.1m.sh" <<'EOF'
+#!/bin/bash
+exec "$HOME/dev/usage_on_mac/mac-health.1m.py" "$@" | sed -E 's/(color=#[a-fA-F0-9]+),#[a-fA-F0-9]+/\1/g; s/(font=[^,| ]+),[^| ]+/\1/g'
+EOF
+chmod +x "$HOME/Library/Application Support/xbar/plugins/"*.sh
 
 # 4. Enable JavaScript from Apple Events in Chrome Beta
 #    Chrome Beta → View → Developer → Allow JavaScript from Apple Events ✓
 #    (one-time, survives restarts)
 
-# 5. Open SwiftBar
-open -a SwiftBar
+# 5. Open xbar
+open -a xbar
 ```
 
-SwiftBar will immediately show the plugins in your menu bar. `claude-usage` refreshes every 5 minutes; `mac-health` every 1 minute.
+xbar will immediately show the plugins in your menu bar. `claude-usage` refreshes every 5 minutes; `mac-health` every 1 minute.
+
+To launch xbar automatically at login: **System Settings → General → Login Items → +** and add `/Applications/xbar.app`.
 
 ### Switch from Chrome Beta to regular Chrome
 
@@ -114,11 +127,11 @@ WORK_DAYS_PER_WEEK = 7
 
 | File | Purpose |
 |---|---|
-| `claude-usage.5m.py` | Main SwiftBar plugin — usage %, pace, active sessions |
+| `claude-usage.5m.py` | Main xbar plugin — usage %, pace, active sessions |
 | `fetch-usage.applescript` | Fetches the usage JSON from an open Chrome/claude.ai tab |
 | `_session_lib.py` | Helper — reads local `~/.claude` transcripts to show context-fill per session |
 | `ccc-context-fill.py` | CLI tool — same context-fill data as a table or JSON |
-| `mac-health.1m.py` | SwiftBar plugin — system load, memory, zombie process watchdog |
+| `mac-health.1m.py` | xbar plugin — system load, memory, zombie process watchdog |
 
 ---
 
@@ -149,9 +162,10 @@ python3 ccc-context-fill.py --table --only-warning
 **Using regular Chrome instead of Chrome Beta**
 - Edit `fetch-usage.applescript` and replace `"Google Chrome Beta"` with `"Google Chrome"`
 
-**SwiftBar isn't showing the plugins**
-- Verify the plugin directory: `defaults read com.ameba.SwiftBar PluginDirectory`
-- Make sure the `.py` files are executable: `chmod +x ~/dev/usage_on_mac/*.py`
+**xbar isn't showing the plugins**
+- Verify the wrappers exist and are executable: `ls -l ~/Library/Application\ Support/xbar/plugins/`
+- Make sure the underlying `.py` files are executable: `chmod +x ~/dev/usage_on_mac/*.py`
+- Open xbar's preferences and confirm it's pointed at `~/Library/Application Support/xbar/plugins/` (the default)
 
 ---
 
