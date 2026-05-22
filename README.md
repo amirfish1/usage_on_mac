@@ -3,7 +3,7 @@
 A pair of [xbar](https://xbarapp.com) plugins that sit in your macOS menu bar:
 
 - **`claude-usage.5m.py`** — shows your real Anthropic Pro/Max weekly usage %, 5-hour session %, and a pace indicator (are you on track to stay under limits this week?). Pulls live data straight from the same endpoint that powers [claude.ai/settings/usage](https://claude.ai/settings/usage).
-- **`mac-health.1m.py`** — system load, memory pressure, and a zombie-process watchdog (flags leaked MCP servers, orphaned `claude` CLI sessions, etc.).
+- **`mac-health.1m.py`** — system load, memory pressure, zombie-process watchdog, and cleanup suggestions for heavy or leaked processes.
 
 ![screenshot showing menu bar with weekly % and dropdown with pace details]()
 
@@ -131,7 +131,13 @@ WORK_DAYS_PER_WEEK = 7
 | `fetch-usage.applescript` | Fetches the usage JSON from an open Chrome/claude.ai tab |
 | `_session_lib.py` | Helper — reads local `~/.claude` transcripts to show context-fill per session |
 | `ccc-context-fill.py` | CLI tool — same context-fill data as a table or JSON |
-| `mac-health.1m.py` | xbar plugin — system load, memory, zombie process watchdog |
+| `mac-health.1m.py` | xbar plugin — system load, memory, zombie process watchdog, cleanup suggestions |
+
+---
+
+## Mac health cleanup
+
+When memory gets tight, `mac-health.1m.py` now ranks the biggest memory groups and processes, then suggests the first cleanup moves to try. Known leaked helpers such as `cozempic` and `calendly-mcp-server` get one-click `pkill -TERM` actions; general high-memory apps/processes stay advisory, with click-to-copy `kill -TERM <pid>` commands for targeted cleanup.
 
 ---
 
