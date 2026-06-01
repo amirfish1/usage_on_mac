@@ -143,6 +143,36 @@ def to_mb(value, unit):
     return float(value) * UNIT_MB.get(unit.upper(), 1)
 
 
+def parse_etime(s):
+    """ps etime: SS, MM:SS, HH:MM:SS, or DD-HH:MM:SS -> minutes."""
+    days = 0
+    if "-" in s:
+        d, s = s.split("-", 1)
+        try:
+            days = int(d)
+        except ValueError:
+            return 0.0
+    try:
+        nums = [int(p) for p in s.split(":")]
+    except ValueError:
+        return 0.0
+    if len(nums) == 1:
+        h, m, sec = 0, 0, nums[0]
+    elif len(nums) == 2:
+        h, m, sec = 0, nums[0], nums[1]
+    else:
+        h, m, sec = nums[0], nums[1], nums[2]
+    return days * 1440 + h * 60 + m + sec / 60.0
+
+
+def fmt_etime(mins):
+    if mins < 60:
+        return f"{mins:.0f}m"
+    if mins < 1440:
+        return f"{mins / 60:.1f}h"
+    return f"{mins / 1440:.1f}d"
+
+
 def fmt_mb(mb):
     if mb is None:
         return "?"
@@ -223,31 +253,37 @@ def load_level(norm):
     return "critical"
 
 
-def headline(load_1m, cores, mem_level):
-    """Color by load-per-core (the only honest way to read load avg)."""
+def headline(load_1m, cores, mem_level, hog_level, hog_count):
+    """Color by max(load-per-core, mem, cpu-hog). Load avg is honest at
+    the box level, but a single 109% runaway hides behind a low aggregate
+    load on a multi-core box, so per-process CPU has to feed in too."""
+    suffix = f" · {hog_count} hog{'' if hog_count == 1 else 's'}" if hog_count else ""
     if load_1m is None:
-        return f"{level_emoji(mem_level)} mem" if level_rank(mem_level) else "⚪ ?", None
+        overall = max((mem_level, hog_level), key=level_rank)
+        emoji = level_emoji(overall) if level_rank(overall) else "⚪"
+        return f"{emoji} mem{suffix}", None
     norm = load_1m / cores
-    overall = mem_level if level_rank(mem_level) > level_rank(load_level(norm)) else load_level(norm)
+    overall = max((load_level(norm), mem_level, hog_level), key=level_rank)
     emoji = level_emoji(overall)
-    return f"{emoji} {load_1m:.1f}", norm
+    return f"{emoji} {load_1m:.1f}{suffix}", norm
 
 
 def process_rows():
-    out = run([PS, "-axo", "pid=,ppid=,rss=,pcpu=,command="])
+    out = run([PS, "-axo", "pid=,ppid=,rss=,pcpu=,etime=,command="])
     rows = []
     for line in out.splitlines():
-        parts = line.strip().split(None, 4)
-        if len(parts) < 5:
+        parts = line.strip().split(None, 5)
+        if len(parts) < 6:
             continue
         try:
             pid = int(parts[0])
             ppid = int(parts[1])
             rss_mb = int(parts[2]) / 1024
             cpu = float(parts[3])
+            etime_min = parse_etime(parts[4])
         except ValueError:
             continue
-        cmd = parts[4]
+        cmd = parts[5]
         if pid == os.getpid() or "mac-health.1m.py" in cmd:
             continue
         rows.append({
@@ -255,6 +291,7 @@ def process_rows():
             "ppid": ppid,
             "rss_mb": rss_mb,
             "cpu": cpu,
+            "etime_min": etime_min,
             "cmd": cmd,
             "label": process_label(cmd),
         })
@@ -305,8 +342,37 @@ def top_memory_processes(rows, limit=6):
     return sorted(rows, key=lambda p: p["rss_mb"], reverse=True)[:limit]
 
 
-def cleanup_suggestions(groups, alarms):
+def cpu_hogs(rows, min_cpu=80, min_etime_min=2):
+    """Sustained CPU users. pcpu is a decaying 1-minute average, so
+    >=min_cpu means it's been hot recently. etime gate filters brief
+    compile/encode spikes that resolve on their own."""
+    return sorted(
+        [r for r in rows if r["cpu"] >= min_cpu and r["etime_min"] >= min_etime_min],
+        key=lambda r: r["cpu"],
+        reverse=True,
+    )
+
+
+def cpu_hog_level(hogs):
+    if not hogs:
+        return "ok"
+    top = hogs[0]["cpu"]
+    if top >= 200:
+        return "critical"
+    if top >= 100:
+        return "high"
+    return "elevated"
+
+
+def cleanup_suggestions(groups, alarms, hogs):
     suggestions = []
+
+    for hog in hogs[:3]:
+        suggestions.append((
+            f"Kill CPU hog: {hog['label']} (PID {hog['pid']}, {hog['cpu']:.0f}% for {fmt_etime(hog['etime_min'])})",
+            f"kill -TERM {hog['pid']}",
+            BAD,
+        ))
 
     for name, n in alarms:
         suggestions.append((
@@ -383,6 +449,8 @@ def main():
     mem_level, mem_summary, mem_color = memory_pressure(s["mem"], total_mb, kernel_pressure_level())
     rows = process_rows()
     groups = memory_groups(rows)
+    hogs = cpu_hogs(rows)
+    hog_lvl = cpu_hog_level(hogs)
 
     # Counts
     claude_cli = count(["-x", "claude"])
@@ -393,7 +461,7 @@ def main():
     claude_index = count(["-f", "claude-index mcp"])
 
     # Headline (load / core, since absolute load is meaningless without core count)
-    head, norm = headline(l1, cores, mem_level)
+    head, norm = headline(l1, cores, mem_level, hog_lvl, len(hogs))
     print(f"{head} | size=12")
     print("---")
 
@@ -431,10 +499,25 @@ def main():
         for name, n in alarms:
             print(f"  {name}: {n} running | font=Menlo {BAD}")
 
+    if hogs:
+        print("---")
+        print(f"🔥 CPU hogs ({len(hogs)}) | size=13 {BAD}")
+        for hog in hogs[:5]:
+            line = (
+                f"  {hog['cpu']:.0f}% · PID {hog['pid']} · {hog['label']} "
+                f"· for {fmt_etime(hog['etime_min'])}"
+            )
+            if is_user_clearable(hog):
+                kill_cmd = f"kill -TERM {hog['pid']}"
+                line += f" · kill | font=Menlo {BAD} {sh_action(kill_cmd, refresh=True)}"
+            else:
+                line += f" | font=Menlo {BAD}"
+            print(line)
+
     # Memory relief: ranked culprits plus safe, concrete next actions.
     print("---")
     print(f"Memory relief | size=13 {C}")
-    suggestions = cleanup_suggestions(groups, alarms)
+    suggestions = cleanup_suggestions(groups, alarms, hogs)
     if suggestions:
         for text, command, color in suggestions:
             if command:
