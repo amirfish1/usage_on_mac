@@ -119,6 +119,21 @@ def parse_iso(s):
     return datetime.fromisoformat(s.replace("Z", "+00:00"))
 
 
+def get_week_start(resets_at_iso):
+    if not resets_at_iso:
+        return None
+    try:
+        resets_local = parse_iso(resets_at_iso).astimezone()
+    except Exception:
+        return None
+    # Special usage reset override: Monday June 1st 2026 at 9:00 AM local time.
+    # The deadline (resets_local) is Friday June 5th 2026.
+    if resets_local.year == 2026 and resets_local.month == 6 and resets_local.day == 5:
+        return datetime(2026, 6, 1, 9, 0, 0).astimezone(resets_local.tzinfo)
+    return resets_local - timedelta(days=7)
+
+
+
 def elapsed_work_hours(start_local, now_local, h_start, h_end):
     """Total work hours within [start_local, now_local] given a daily window."""
     if now_local <= start_local:
@@ -237,21 +252,24 @@ def pace_for(weekly_pct, weekly_resets_at_iso):
     """Returns dict with elapsed_h, total_h, expected_pct, delta_pp, projected_pct, or None."""
     if weekly_pct is None or not weekly_resets_at_iso:
         return None
+    week_start_local = get_week_start(weekly_resets_at_iso)
+    if not week_start_local:
+        return None
     try:
         resets_local = parse_iso(weekly_resets_at_iso).astimezone()
     except Exception:
         return None
-    week_start_local = resets_local - timedelta(days=7)
     now_local = datetime.now().astimezone()
-    h_per_day = WORK_END_HOUR - WORK_START_HOUR
-    total_h = h_per_day * WORK_DAYS_PER_WEEK
+    total_h = elapsed_work_hours(week_start_local, resets_local, WORK_START_HOUR, WORK_END_HOUR)
     elapsed_h = elapsed_work_hours(week_start_local, now_local, WORK_START_HOUR, WORK_END_HOUR)
     expected = (elapsed_h / total_h) * 100 if total_h else 0
     delta = weekly_pct - expected
     projected = (weekly_pct / elapsed_h) * total_h if elapsed_h > 0 else None
+    hours_left = max(0.0, total_h - elapsed_h)
     return {
         "elapsed_h": elapsed_h,
         "total_h": total_h,
+        "hours_left": hours_left,
         "expected_pct": expected,
         "delta_pp": delta,
         "projected_pct": projected,
@@ -272,10 +290,11 @@ def main():
         try:
             sd = (fresh.get("seven_day") or {})
             if sd.get("resets_at") and sd.get("utilization") is not None:
-                ws = parse_iso(sd["resets_at"]).astimezone() - timedelta(days=7)
-                tokens = count_week_tokens(ws)
-                if tokens > 0:
-                    save_calibration(ws, tokens, sd["utilization"])
+                ws = get_week_start(sd["resets_at"])
+                if ws:
+                    tokens = count_week_tokens(ws)
+                    if tokens > 0:
+                        save_calibration(ws, tokens, sd["utilization"])
         except Exception:
             pass
     else:
@@ -298,19 +317,20 @@ def main():
         sd = (usage.get("seven_day") or {})
         if cal and sd.get("resets_at"):
             try:
-                ws_now = parse_iso(sd["resets_at"]).astimezone() - timedelta(days=7)
-                cal_ws = datetime.fromisoformat(cal["week_start"])
-                if abs((ws_now - cal_ws).total_seconds()) < 3600 and cal.get("tokens", 0) > 0:
-                    rate = cal["real_pct"] / cal["tokens"]  # pct per token
-                    cur_tokens = count_week_tokens(ws_now)
-                    est = round(cur_tokens * rate, 1)
-                    # Replace cached pct with estimate (don't go below cached real %)
-                    usage = dict(usage)
-                    usage["seven_day"] = dict(sd)
-                    usage["seven_day"]["utilization"] = max(est, sd.get("utilization") or 0)
-                    estimated = True
-                    fetched_at = time.time()
-                    stale = False
+                ws_now = get_week_start(sd["resets_at"])
+                if ws_now:
+                    cal_ws = datetime.fromisoformat(cal["week_start"])
+                    if abs((ws_now - cal_ws).total_seconds()) < 3600 and cal.get("tokens", 0) > 0:
+                        rate = cal["real_pct"] / cal["tokens"]  # pct per token
+                        cur_tokens = count_week_tokens(ws_now)
+                        est = round(cur_tokens * rate, 1)
+                        # Replace cached pct with estimate (don't go below cached real %)
+                        usage = dict(usage)
+                        usage["seven_day"] = dict(sd)
+                        usage["seven_day"]["utilization"] = max(est, sd.get("utilization") or 0)
+                        estimated = True
+                        fetched_at = time.time()
+                        stale = False
             except Exception:
                 pass
 
@@ -379,6 +399,7 @@ def main():
     if pace:
         eh = pace["elapsed_h"]
         th = pace["total_h"]
+        hours_left = pace["hours_left"]
         exp = pace["expected_pct"]
         delta = pace["delta_pp"]
         proj = pace["projected_pct"]
@@ -394,7 +415,7 @@ def main():
             verdict = "warming up — not enough work hours yet"
         print(f"  Used {weekly:.0f}% · expected {exp:.0f}% · Δ {delta:+.0f}pp | {C}")
         print(f"  {verdict} | {verdict_color}")
-        print(f"  Worked {eh:.1f}h of {th}h ({WORK_START_HOUR}:00–{WORK_END_HOUR}:00 daily, {WORK_DAYS_PER_WEEK}d) | {CD}")
+        print(f"  Worked {eh:.1f}h · {hours_left:.1f}h left (of {th:.1f}h total, {WORK_START_HOUR}:00–{WORK_END_HOUR}:00 daily) | {CD}")
 
     if sonnet is not None:
         print(f"Weekly Sonnet only | size=13 {C}")
