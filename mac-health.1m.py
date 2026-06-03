@@ -11,10 +11,14 @@
 # counts for things that tend to leak (cozempic, calendly-mcp-server,
 # claude CLI sessions, node, npm), and ranked memory cleanup suggestions.
 
+import datetime
+import json
 import os
 import re
 import shlex
 import subprocess
+import time
+import urllib.request
 
 C  = "color=#1a1a1a,#ffffff"
 CD = "color=#666666,#cfcfcf"
@@ -43,6 +47,13 @@ ZOMBIE_PATTERNS = [
     ("cozempic", "cozempic"),
     ("calendly-mcp-server", "calendly-mcp-server"),
 ]
+
+# Claude Command Center (CCC) — the local orchestration daemon. Its health is
+# dominated by the /api/sessions/live-activity poll path, so we watch the
+# server process CPU, probe that endpoint's latency, and count recent errors.
+CCC_SERVER_MATCH = "claude-command-center/server.py"
+CCC_LIVE_URL = "http://localhost:8090/api/sessions/live-activity"
+CCC_ERR_LOG = os.path.expanduser("~/.claude/command-center/logs/service.err.log")
 
 
 def run(cmd, timeout=5):
@@ -253,19 +264,21 @@ def load_level(norm):
     return "critical"
 
 
-def headline(load_1m, cores, mem_level, hog_level, hog_count):
-    """Color by max(load-per-core, mem, cpu-hog). Load avg is honest at
+def headline(load_1m, cores, mem_level, hog_level, hog_count, ccc_level="ok"):
+    """Color by max(load-per-core, mem, cpu-hog, CCC). Load avg is honest at
     the box level, but a single 109% runaway hides behind a low aggregate
-    load on a multi-core box, so per-process CPU has to feed in too."""
+    load on a multi-core box, so per-process CPU has to feed in too. CCC's
+    health rides along so a bad daemon shows without opening the menu."""
     suffix = f" · {hog_count} hog{'' if hog_count == 1 else 's'}" if hog_count else ""
+    ccc_tag = " · CCC" if level_rank(ccc_level) >= 2 else ""
     if load_1m is None:
-        overall = max((mem_level, hog_level), key=level_rank)
+        overall = max((mem_level, hog_level, ccc_level), key=level_rank)
         emoji = level_emoji(overall) if level_rank(overall) else "⚪"
-        return f"{emoji} mem{suffix}", None
+        return f"{emoji} mem{suffix}{ccc_tag}", None
     norm = load_1m / cores
-    overall = max((load_level(norm), mem_level, hog_level), key=level_rank)
+    overall = max((load_level(norm), mem_level, hog_level, ccc_level), key=level_rank)
     emoji = level_emoji(overall)
-    return f"{emoji} {load_1m:.1f}{suffix}", norm
+    return f"{emoji} {load_1m:.1f}{suffix}{ccc_tag}", norm
 
 
 def process_rows():
@@ -436,6 +449,102 @@ def is_user_clearable(row):
     }
 
 
+def ccc_server_proc(rows):
+    """The CCC daemon row from the process list, or None if it isn't running."""
+    for r in rows:
+        if CCC_SERVER_MATCH in r["cmd"]:
+            return r
+    return None
+
+
+def ccc_probe_live_activity(timeout=2.0):
+    """Hit the poll endpoint and time it. Returns
+    {ok, ms, sessions, error}. This is the functional health check — it's the
+    exact path that pins the CPU when it regresses."""
+    t = time.time()
+    try:
+        with urllib.request.urlopen(CCC_LIVE_URL, timeout=timeout) as resp:
+            body = resp.read()
+        ms = (time.time() - t) * 1000
+        try:
+            data = json.loads(body)
+            sessions = len(data.get("sessions", {})) if isinstance(data, dict) else None
+        except ValueError:
+            sessions = None
+        return {"ok": True, "ms": ms, "sessions": sessions, "error": None}
+    except Exception as e:
+        return {"ok": False, "ms": (time.time() - t) * 1000, "sessions": None,
+                "error": type(e).__name__}
+
+
+_MONTHS = {m: i for i, m in enumerate(
+    ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
+     "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"], 1)}
+# Access-log stamp: 127.0.0.1 - - [02/Jun/2026 17:24:43] "GET ...
+_ACCESS_TS_RE = re.compile(r"\[(\d{2})/([A-Za-z]{3})/(\d{4}) (\d{2}):(\d{2}):(\d{2})\]")
+
+
+def ccc_recent_errors(window_min=60, tail_bytes=400_000):
+    """Count Python tracebacks in the CCC error log within the last
+    window_min minutes — catches crash storms (e.g. the sqlite InterfaceError
+    class) without going red over stale history (the log persists across
+    restarts). Time is taken from the interleaved access-log stamps. None if
+    no log."""
+    try:
+        with open(CCC_ERR_LOG, "rb") as f:
+            f.seek(0, 2)
+            size = f.tell()
+            f.seek(max(0, size - tail_bytes))
+            data = f.read().decode("utf-8", "replace")
+    except OSError:
+        return None
+    cutoff = time.time() - window_min * 60
+    recent_ts = None
+    count = 0
+    for line in data.splitlines():
+        m = _ACCESS_TS_RE.search(line)
+        if m:
+            try:
+                recent_ts = datetime.datetime(
+                    int(m.group(3)), _MONTHS.get(m.group(2), 1), int(m.group(1)),
+                    int(m.group(4)), int(m.group(5)), int(m.group(6)),
+                ).timestamp()
+            except ValueError:
+                pass
+        elif "Traceback (most recent call last)" in line:
+            # Attribute the traceback to the most recent stamp seen above it.
+            # Conservative: a traceback with no recent preceding stamp is
+            # treated as stale (the log persists across restarts and CCC
+            # doesn't stamp every request), so we don't go red over history.
+            if recent_ts is not None and recent_ts >= cutoff:
+                count += 1
+    return count
+
+
+def ccc_health(proc, probe, errors):
+    """Roll the three signals into one level for the headline."""
+    if proc is None or not probe["ok"]:
+        return "critical"
+    level = "ok"
+    cpu = proc["cpu"]
+    if cpu >= 100:
+        level = max(level, "high", key=level_rank)
+    elif cpu >= 50:
+        level = max(level, "elevated", key=level_rank)
+    ms = probe["ms"]
+    if ms is not None:
+        if ms >= 2000:
+            level = max(level, "high", key=level_rank)
+        elif ms >= 500:
+            level = max(level, "elevated", key=level_rank)
+    if errors:
+        if errors > 5:
+            level = max(level, "high", key=level_rank)
+        else:
+            level = max(level, "elevated", key=level_rank)
+    return level
+
+
 def main():
     s = parse_top()
     vm = parse_vm_stat()
@@ -452,6 +561,12 @@ def main():
     hogs = cpu_hogs(rows)
     hog_lvl = cpu_hog_level(hogs)
 
+    # CCC daemon health (server CPU, poll-path latency, recent errors)
+    ccc_proc = ccc_server_proc(rows)
+    ccc_probe = ccc_probe_live_activity()
+    ccc_errors = ccc_recent_errors()
+    ccc_lvl = ccc_health(ccc_proc, ccc_probe, ccc_errors)
+
     # Counts
     claude_cli = count(["-x", "claude"])
     node       = count(["-x", "node"])
@@ -461,7 +576,7 @@ def main():
     claude_index = count(["-f", "claude-index mcp"])
 
     # Headline (load / core, since absolute load is meaningless without core count)
-    head, norm = headline(l1, cores, mem_level, hog_lvl, len(hogs))
+    head, norm = headline(l1, cores, mem_level, hog_lvl, len(hogs), ccc_lvl)
     print(f"{head} | size=12")
     print("---")
 
@@ -473,6 +588,32 @@ def main():
     if s["cpu_idle"] is not None:
         idle_color = OK if s["cpu_idle"] > 50 else (WARN if s["cpu_idle"] > 25 else BAD)
         print(f"CPU idle: {s['cpu_idle']:.0f}% | size=13 {idle_color}")
+    print("---")
+
+    # CCC (Claude Command Center) health
+    ccc_color = {"ok": OK, "elevated": WARN, "high": BAD, "critical": BAD}.get(ccc_lvl, CD)
+    print(f"CCC {level_emoji(ccc_lvl)} | size=13 {ccc_color}")
+    if ccc_proc is None:
+        print(f"  server: not running | font=Menlo {BAD}")
+    else:
+        cpu_color = OK if ccc_proc["cpu"] < 50 else (WARN if ccc_proc["cpu"] < 100 else BAD)
+        print(
+            f"  server: {ccc_proc['cpu']:.0f}% CPU · {fmt_mb(ccc_proc['rss_mb'])} · "
+            f"up {fmt_etime(ccc_proc['etime_min'])} · PID {ccc_proc['pid']} | font=Menlo {cpu_color}"
+        )
+    if ccc_probe["ok"]:
+        ms = ccc_probe["ms"]
+        lat_color = OK if ms < 500 else (WARN if ms < 2000 else BAD)
+        sess = ccc_probe["sessions"]
+        sess_txt = f" · {sess} live session{'' if sess == 1 else 's'}" if sess is not None else ""
+        print(f"  live-activity: {ms:.0f} ms{sess_txt} | font=Menlo {lat_color}")
+    else:
+        print(f"  live-activity: unreachable ({ccc_probe['error']}) | font=Menlo {BAD}")
+    if ccc_errors is None:
+        print(f"  errors: log not found | font=Menlo {CD}")
+    else:
+        err_color = OK if ccc_errors == 0 else (WARN if ccc_errors <= 5 else BAD)
+        print(f"  errors (recent): {ccc_errors} | font=Menlo {err_color}")
     print("---")
 
     # Memory
@@ -530,22 +671,14 @@ def main():
     print("  Open Activity Monitor | "
           "shell=/usr/bin/open param1=-a param2=\"Activity Monitor\" terminal=false")
 
+    # Top memory groups (aggregated by app; kill actions live in the
+    # suggestions above, so the per-PID list was redundant and was removed).
     print("  Top memory groups | font=Menlo {0}".format(CD))
     for group in groups[:5]:
         print(
             f"    {fmt_mb(group['rss_mb'])} · {group['count']} procs · {group['label']} "
             f"| font=Menlo {CD}"
         )
-
-    print("  Top memory processes | font=Menlo {0}".format(CD))
-    for row in top_memory_processes(rows):
-        line = f"    {fmt_mb(row['rss_mb'])} · PID {row['pid']} · {row['label']}"
-        if is_user_clearable(row):
-            kill_cmd = f"kill -TERM {row['pid']}"
-            line += f" · copy kill cmd | font=Menlo {CD} {copy_action(kill_cmd)}"
-        else:
-            line += f" | font=Menlo {CD}"
-        print(line)
 
     print("---")
     print("Refresh | refresh=true")
