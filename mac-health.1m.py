@@ -31,6 +31,18 @@ PGREP = "/usr/bin/pgrep"
 PS = "/bin/ps"
 SYSCTL = "/usr/sbin/sysctl"
 VM_STAT = "/usr/bin/vm_stat"
+LSOF = "/usr/sbin/lsof"
+
+# Claude CLI sessions each anchor a subtree (chrome-devtools-mcp, node, python,
+# uv …) that can hold hundreds of MB. We reap by the whole tree, but never a
+# session that's interactive (a TTY = a human is in it) or driving real work
+# (a transcode/encode child is the tell). Caveat: a *bursty* worker (e.g.
+# whisper run chunk-by-chunk) is invisible during the few-second gaps between
+# chunks; the worker runs minutes per chunk, so it's protected almost always,
+# and reaping is always a deliberate click — but the gap is a known blind spot.
+STALE_SESSION_MIN = 120     # age past which an idle session is "stale"
+SESSION_BUSY_CPU = 30.0     # tree CPU% above which a session counts as working
+WORKER_RE = re.compile(r"\b(whisper(?:-cli)?|ffmpeg|ffprobe|HandBrakeCLI)\b", re.I)
 
 # Mach kernel memory pressure levels (from sys/kern_memorystatus.h):
 # 1 = NORMAL, 2 = WARN, 4 = CRITICAL. Matches Activity Monitor's pressure bar.
@@ -119,6 +131,19 @@ def parse_vm_stat():
         "compressed_mb": mb("Pages occupied by compressor"),
         "available_mb": free + inactive + speculative + purgeable,
     }
+
+
+def swap_usage():
+    """macOS swap from vm.swapusage. Heavy swap is the real 'why is everything
+    slow' signal — pressure can read OK while the box thrashes through swap."""
+    out = run([SYSCTL, "-n", "vm.swapusage"]).strip()
+    pairs = re.findall(r"(total|used|free)\s*=\s*([\d.]+)([KMGT])", out)
+    if not pairs:
+        return None
+    d = {k: to_mb(v, u) for k, v, u in pairs}
+    if "total" not in d:
+        return None
+    return d
 
 
 def kernel_pressure_level():
@@ -282,11 +307,11 @@ def headline(load_1m, cores, mem_level, hog_level, hog_count, ccc_level="ok"):
 
 
 def process_rows():
-    out = run([PS, "-axo", "pid=,ppid=,rss=,pcpu=,etime=,command="])
+    out = run([PS, "-axo", "pid=,ppid=,rss=,pcpu=,etime=,tty=,command="])
     rows = []
     for line in out.splitlines():
-        parts = line.strip().split(None, 5)
-        if len(parts) < 6:
+        parts = line.strip().split(None, 6)
+        if len(parts) < 7:
             continue
         try:
             pid = int(parts[0])
@@ -296,7 +321,8 @@ def process_rows():
             etime_min = parse_etime(parts[4])
         except ValueError:
             continue
-        cmd = parts[5]
+        tty = parts[5]
+        cmd = parts[6]
         if pid == os.getpid() or "mac-health.1m.py" in cmd:
             continue
         rows.append({
@@ -305,6 +331,7 @@ def process_rows():
             "rss_mb": rss_mb,
             "cpu": cpu,
             "etime_min": etime_min,
+            "tty": tty,
             "cmd": cmd,
             "label": process_label(cmd),
         })
@@ -353,6 +380,87 @@ def memory_groups(rows):
 
 def top_memory_processes(rows, limit=6):
     return sorted(rows, key=lambda p: p["rss_mb"], reverse=True)[:limit]
+
+
+def _descendants(root, children):
+    seen, stack = [], list(children.get(root, []))
+    while stack:
+        pid = stack.pop()
+        seen.append(pid)
+        stack.extend(children.get(pid, []))
+    return seen
+
+
+def session_cwds(pids):
+    """Batch one lsof for the cwd of every session root — used to tell the
+    sessions apart by repo. Cheap enough at ~10 roots; skipped if none."""
+    if not pids:
+        return {}
+    out = run([LSOF, "-a", "-d", "cwd", "-Fn", "-p", ",".join(map(str, pids))])
+    cwds, cur = {}, None
+    for line in out.splitlines():
+        if line.startswith("p"):
+            try:
+                cur = int(line[1:])
+            except ValueError:
+                cur = None
+        elif line.startswith("n") and cur is not None:
+            cwds.setdefault(cur, line[1:])
+    return cwds
+
+
+def _is_interactive_tty(tty):
+    """A real controlling terminal (ttys000…) means a human is in this session;
+    headless CCC-spawned `claude -p` sessions show '??'. Never reap a terminal."""
+    return bool(tty) and tty not in ("??", "?", "-", "")
+
+
+def claude_sessions(rows):
+    """Each claude-CLI root rolled up with its whole subtree's RSS/CPU. A
+    session is only reapable when it is headless (no TTY), idle (no
+    encode/transcode child, low CPU), and stale (old) — so a terminal you're
+    in or a session driving work is never offered for reaping."""
+    by_pid = {r["pid"]: r for r in rows}
+    children = {}
+    for r in rows:
+        children.setdefault(r["ppid"], []).append(r["pid"])
+
+    sessions = []
+    for r in rows:
+        if r["label"] != "claude CLI":
+            continue
+        desc = _descendants(r["pid"], children)
+        desc_rows = [by_pid[p] for p in desc if p in by_pid]
+        tree_rss = r["rss_mb"] + sum(d["rss_mb"] for d in desc_rows)
+        tree_cpu = r["cpu"] + sum(d["cpu"] for d in desc_rows)
+        worker = next((d for d in desc_rows if WORKER_RE.search(d["cmd"])), None)
+        interactive = _is_interactive_tty(r["tty"])
+        busy = bool(worker) or tree_cpu >= SESSION_BUSY_CPU
+        reapable = (not interactive) and (not busy) and r["etime_min"] >= STALE_SESSION_MIN
+        sessions.append({
+            "pid": r["pid"],
+            "age_min": r["etime_min"],
+            "tree_rss": tree_rss,
+            "tree_cpu": tree_cpu,
+            "tree_pids": [r["pid"]] + desc,
+            "nprocs": 1 + len(desc),
+            "interactive": interactive,
+            "busy": busy,
+            "worker": worker["label"] if worker else None,
+            "reapable": reapable,
+        })
+
+    cwds = session_cwds([s["pid"] for s in sessions])
+    home = os.path.expanduser("~")
+    for s in sessions:
+        cwd = cwds.get(s["pid"], "")
+        if cwd == home:
+            s["cwd"] = "~"
+        elif cwd:
+            s["cwd"] = os.path.basename(cwd) or cwd
+        else:
+            s["cwd"] = "?"
+    return sorted(sessions, key=lambda s: s["tree_rss"], reverse=True)
 
 
 def cpu_hogs(rows, min_cpu=80, min_etime_min=2):
@@ -620,6 +728,14 @@ def main():
     print(f"Memory | size=13 {C}")
     print(f"  {used} used · {avail} available | font=Menlo {CD}")
     print(f"  {comp} compressed | font=Menlo {CD}")
+    swap = swap_usage()
+    if swap and swap["total"]:
+        used_pct = swap["used"] / swap["total"]
+        sw_color = OK if used_pct < 0.5 else (WARN if used_pct < 0.85 else BAD)
+        print(
+            f"  swap: {fmt_mb(swap['used'])} / {fmt_mb(swap['total'])} "
+            f"({used_pct * 100:.0f}%) | font=Menlo {sw_color}"
+        )
     print(f"  {mem_summary} | font=Menlo {mem_color}")
     print("---")
 
@@ -627,6 +743,39 @@ def main():
     print(f"Processes: {s['procs']} · {s['threads']} threads | size=13 {C}")
     print(f"  claude CLI: {claude_cli}  ·  claude-index: {claude_index} | font=Menlo {CD}")
     print(f"  node: {node}  ·  npm: {npm} | font=Menlo {CD}")
+
+    # Claude sessions — each anchors an MCP subtree; reap stale ones by the
+    # whole tree, protect any that's driving an encode/transcode.
+    sessions = claude_sessions(rows)
+    if sessions:
+        print("---")
+        total_tree = sum(s["tree_rss"] for s in sessions)
+        reapable = [s for s in sessions if s["reapable"]]
+        reap_rss = sum(s["tree_rss"] for s in reapable)
+        reap_tag = f" · {len(reapable)} reapable ({fmt_mb(reap_rss)})" if reapable else ""
+        head_color = WARN if reapable else C
+        print(f"Claude sessions: {len(sessions)} · {fmt_mb(total_tree)}{reap_tag} | size=13 {head_color}")
+        for s in sessions[:8]:
+            meta = (
+                f"{fmt_etime(s['age_min'])} · {fmt_mb(s['tree_rss'])} · "
+                f"{s['nprocs']} procs · {s['cwd']} · PID {s['pid']}"
+            )
+            kill_cmd = "kill -TERM " + " ".join(str(p) for p in s["tree_pids"])
+            if s["interactive"]:
+                print(f"  ⌨ {meta} · in use (terminal) | font=Menlo {CD}")
+            elif s["busy"]:
+                why = f"working: {s['worker']}" if s["worker"] else f"{s['tree_cpu']:.0f}% CPU"
+                print(f"  ⚙ {meta} · {why} | font=Menlo {OK}")
+            elif s["reapable"]:
+                print(f"  🧹 {meta} · kill tree | font=Menlo {WARN} {sh_action(kill_cmd, refresh=True)}")
+            else:
+                print(f"  {meta} · idle (recent) · kill tree | font=Menlo {CD} {sh_action(kill_cmd, refresh=True)}")
+        if len(reapable) > 1:
+            kill_all = "kill -TERM " + " ".join(
+                str(p) for s in reapable for p in s["tree_pids"]
+            )
+            print(f"  🧹 Reap all {len(reapable)} stale session trees ({fmt_mb(reap_rss)}) "
+                  f"| font=Menlo {WARN} {sh_action(kill_all, refresh=True)}")
 
     # Should-be-zero alarms
     zombie_counts = {
