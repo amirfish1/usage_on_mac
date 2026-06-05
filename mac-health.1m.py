@@ -12,6 +12,7 @@
 # claude CLI sessions, node, npm), and ranked memory cleanup suggestions.
 
 import datetime
+import glob
 import json
 import os
 import re
@@ -36,13 +37,18 @@ LSOF = "/usr/sbin/lsof"
 # Claude CLI sessions each anchor a subtree (chrome-devtools-mcp, node, python,
 # uv …) that can hold hundreds of MB. We reap by the whole tree, but never a
 # session that's interactive (a TTY = a human is in it) or driving real work
-# (a transcode/encode child is the tell). Caveat: a *bursty* worker (e.g.
-# whisper run chunk-by-chunk) is invisible during the few-second gaps between
-# chunks; the worker runs minutes per chunk, so it's protected almost always,
-# and reaping is always a deliberate click — but the gap is a known blind spot.
-STALE_SESSION_MIN = 120     # age past which an idle session is "stale"
+# (a transcode/encode child is the tell). "Stale" = idle for a while, measured
+# by the transcript mtime (every turn appends to the session .jsonl, so its
+# mtime is a real last-activity clock that freezes when the session goes idle)
+# — NOT process age, which says nothing about whether it's still in use.
+# Caveat: a *bursty* worker (whisper run chunk-by-chunk) is invisible during the
+# few-second gaps between chunks, and a session blocked on one long command has
+# a frozen transcript too — both lean on the worker/CPU check, not the clock.
+STALE_SESSION_MIN = 120     # idle minutes past which a session is "stale"
 SESSION_BUSY_CPU = 30.0     # tree CPU% above which a session counts as working
 WORKER_RE = re.compile(r"\b(whisper(?:-cli)?|ffmpeg|ffprobe|HandBrakeCLI)\b", re.I)
+SESSION_UUID_RE = re.compile(r"--(?:resume|session-id|sid)\s+([0-9a-fA-F-]{36})")
+PROJECTS_DIR = os.path.expanduser("~/.claude/projects")
 
 # Mach kernel memory pressure levels (from sys/kern_memorystatus.h):
 # 1 = NORMAL, 2 = WARN, 4 = CRITICAL. Matches Activity Monitor's pressure bar.
@@ -391,6 +397,23 @@ def _descendants(root, children):
     return seen
 
 
+def session_last_activity_min(uuid, now):
+    """Minutes since the session transcript was last appended to, or None if the
+    uuid isn't in args / no transcript exists. The .jsonl gets a write on every
+    turn, so this is 'time since last activity' — frozen while idle."""
+    if not uuid:
+        return None
+    mtimes = []
+    for p in glob.glob(os.path.join(PROJECTS_DIR, "*", uuid + ".jsonl")):
+        try:
+            mtimes.append(os.path.getmtime(p))
+        except OSError:
+            pass
+    if not mtimes:
+        return None
+    return (now - max(mtimes)) / 60.0
+
+
 def session_cwds(pids):
     """Batch one lsof for the cwd of every session root — used to tell the
     sessions apart by repo. Cheap enough at ~10 roots; skipped if none."""
@@ -425,6 +448,7 @@ def claude_sessions(rows):
     for r in rows:
         children.setdefault(r["ppid"], []).append(r["pid"])
 
+    now = time.time()
     sessions = []
     for r in rows:
         if r["label"] != "claude CLI":
@@ -436,10 +460,17 @@ def claude_sessions(rows):
         worker = next((d for d in desc_rows if WORKER_RE.search(d["cmd"])), None)
         interactive = _is_interactive_tty(r["tty"])
         busy = bool(worker) or tree_cpu >= SESSION_BUSY_CPU
-        reapable = (not interactive) and (not busy) and r["etime_min"] >= STALE_SESSION_MIN
+        # Idle = minutes since last transcript write; fall back to process age
+        # when we can't find the transcript (no uuid in args).
+        uuid = (m.group(1) if (m := SESSION_UUID_RE.search(r["cmd"])) else None)
+        idle_known = session_last_activity_min(uuid, now)
+        idle_min = idle_known if idle_known is not None else r["etime_min"]
+        reapable = (not interactive) and (not busy) and idle_min >= STALE_SESSION_MIN
         sessions.append({
             "pid": r["pid"],
             "age_min": r["etime_min"],
+            "idle_min": idle_min,
+            "idle_known": idle_known is not None,
             "tree_rss": tree_rss,
             "tree_cpu": tree_cpu,
             "tree_pids": [r["pid"]] + desc,
@@ -756,8 +787,10 @@ def main():
         head_color = WARN if reapable else C
         print(f"Claude sessions: {len(sessions)} · {fmt_mb(total_tree)}{reap_tag} | size=13 {head_color}")
         for s in sessions[:8]:
+            when = (f"idle {fmt_etime(s['idle_min'])}" if s["idle_known"]
+                    else f"up {fmt_etime(s['age_min'])}")
             meta = (
-                f"{fmt_etime(s['age_min'])} · {fmt_mb(s['tree_rss'])} · "
+                f"{when} · {fmt_mb(s['tree_rss'])} · "
                 f"{s['nprocs']} procs · {s['cwd']} · PID {s['pid']}"
             )
             kill_cmd = "kill -TERM " + " ".join(str(p) for p in s["tree_pids"])
