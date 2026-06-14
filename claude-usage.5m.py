@@ -36,6 +36,9 @@ APPLESCRIPT = SCRIPT.parent / "fetch-usage.applescript"
 CACHE = Path.home() / ".cache" / "claude-usage-pct.json"
 CAL_FILE = Path.home() / ".cache" / "claude-usage-cal.json"
 TOKEN_CACHE = Path.home() / ".cache" / "claude-usage-tokens.json"
+# Manual override for the pace "week start" (see get_week_start). Set/cleared
+# from the menu bar; auto-expires when the weekly reset rolls to a new date.
+WEEKSTART_FILE = Path.home() / ".cache" / "claude-usage-weekstart.json"
 PROJECTS_DIR = Path.home() / ".claude" / "projects"
 STALE_AFTER = 600  # seconds — show a "stale" marker if older than this
 
@@ -51,7 +54,8 @@ def fetch_via_chrome():
     try:
         proc = subprocess.run(
             ["osascript", str(APPLESCRIPT)],
-            capture_output=True, text=True, timeout=12,
+            # The AppleScript may reload a Memory-Saver-frozen tab and retry (~25s worst case)
+            capture_output=True, text=True, timeout=35,
         )
     except Exception as e:
         return None, f"osascript failed: {e}"
@@ -119,6 +123,36 @@ def parse_iso(s):
     return datetime.fromisoformat(s.replace("Z", "+00:00"))
 
 
+def load_weekstart_override():
+    try:
+        return json.loads(WEEKSTART_FILE.read_text())
+    except Exception:
+        return None
+
+
+def resets_week_key(resets_at_iso):
+    """A stable key identifying the reset week. Uses the UTC date of resets_at:
+    the reset lands near local midnight, so its *local* date can flip across the
+    day boundary on sub-second jitter between fetches — its UTC date (reset is
+    ~07:00 UTC, far from a UTC boundary) does not."""
+    return parse_iso(resets_at_iso).astimezone(timezone.utc).date().isoformat()
+
+
+def active_weekstart_override(resets_at_iso):
+    """Return the manual week-start datetime if an override applies to the
+    current reset week, else None. Keyed on resets_week_key so the override
+    auto-expires once Anthropic's weekly reset rolls over."""
+    ov = load_weekstart_override()
+    if not ov or not resets_at_iso:
+        return None
+    try:
+        if ov.get("applies_to_resets_week") == resets_week_key(resets_at_iso):
+            return parse_iso(ov["week_start"]).astimezone()
+    except Exception:
+        return None
+    return None
+
+
 def get_week_start(resets_at_iso):
     if not resets_at_iso:
         return None
@@ -126,10 +160,9 @@ def get_week_start(resets_at_iso):
         resets_local = parse_iso(resets_at_iso).astimezone()
     except Exception:
         return None
-    # Special usage reset override: Monday June 1st 2026 at 9:00 AM local time.
-    # The deadline (resets_local) is Friday June 5th 2026.
-    if resets_local.year == 2026 and resets_local.month == 6 and resets_local.day == 5:
-        return datetime(2026, 6, 1, 9, 0, 0).astimezone(resets_local.tzinfo)
+    override = active_weekstart_override(resets_at_iso)
+    if override is not None:
+        return override
     return resets_local - timedelta(days=7)
 
 
@@ -277,7 +310,99 @@ def pace_for(weekly_pct, weekly_resets_at_iso):
     }
 
 
+def _osascript_dialog(prompt, default_answer):
+    """Show a text-input dialog. Returns the entered text, or None if the user
+    cancelled or anything went wrong."""
+    try:
+        proc = subprocess.run(
+            ["osascript", "-e",
+             f'display dialog {json.dumps(prompt)} default answer {json.dumps(default_answer)} '
+             f'with title "Claude Usage — pace start"'],
+            capture_output=True, text=True, timeout=180,
+        )
+    except Exception:
+        return None
+    if proc.returncode != 0:  # user pressed Cancel
+        return None
+    out = proc.stdout or ""
+    marker = "text returned:"
+    idx = out.find(marker)
+    if idx == -1:
+        return None
+    return out[idx + len(marker):].strip()
+
+
+def _osascript_alert(msg):
+    try:
+        subprocess.run(
+            ["osascript", "-e",
+             f'display dialog {json.dumps(msg)} with title "Claude Usage" '
+             f'buttons {{"OK"}} default button "OK" with icon caution'],
+            capture_output=True, text=True, timeout=30,
+        )
+    except Exception:
+        pass
+
+
+def cli_set_start():
+    """Prompt for a new pace week-start and persist it as an override."""
+    cached = read_cache()
+    resets_at = None
+    if cached:
+        resets_at = ((cached.get("usage") or {}).get("seven_day") or {}).get("resets_at")
+    if not resets_at:
+        _osascript_alert("No weekly usage data cached yet. Open the menu once to "
+                         "fetch live data, then try again.")
+        return
+    resets_local = parse_iso(resets_at).astimezone()
+    cur_ws = get_week_start(resets_at) or (resets_local - timedelta(days=7))
+    default = cur_ws.strftime("%Y-%m-%d %H:%M")
+    prompt = ("Set the pace week-start (local time).\n"
+              f"Weekly resets: {resets_local.strftime('%Y-%m-%d %H:%M')}.\n"
+              "Format: YYYY-MM-DD HH:MM")
+    ans = _osascript_dialog(prompt, default)
+    if not ans:
+        return  # cancelled
+    try:
+        ws = datetime.strptime(ans, "%Y-%m-%d %H:%M").astimezone()
+    except Exception:
+        _osascript_alert(f"Couldn't parse '{ans}'.\nUse format YYYY-MM-DD HH:MM "
+                         "(e.g. 2026-06-12 06:00).")
+        return
+    if ws >= resets_local:
+        _osascript_alert("Start time must be before the weekly reset "
+                         f"({resets_local.strftime('%Y-%m-%d %H:%M')}).")
+        return
+    try:
+        WEEKSTART_FILE.parent.mkdir(parents=True, exist_ok=True)
+        WEEKSTART_FILE.write_text(json.dumps({
+            "week_start": ws.isoformat(),
+            "applies_to_resets_at": resets_at,
+            "applies_to_resets_week": resets_week_key(resets_at),
+            "set_at": time.time(),
+        }))
+    except Exception as e:
+        _osascript_alert(f"Couldn't save override: {e}")
+
+
+def cli_clear_start():
+    try:
+        WEEKSTART_FILE.unlink()
+    except FileNotFoundError:
+        pass
+    except Exception:
+        pass
+
+
 def main():
+    if len(sys.argv) > 1:
+        if sys.argv[1] == "--set-start":
+            cli_set_start()
+            return
+        if sys.argv[1] == "--clear-start":
+            cli_clear_start()
+            return
+
     fresh, err = fetch_via_chrome()
     estimated = False
 
@@ -336,6 +461,7 @@ def main():
 
     weekly = (usage.get("seven_day") or {}).get("utilization")
     weekly_reset = (usage.get("seven_day") or {}).get("resets_at")
+    ws_override = active_weekstart_override(weekly_reset)
     session = (usage.get("five_hour") or {}).get("utilization")
     session_reset = (usage.get("five_hour") or {}).get("resets_at")
     sonnet = (usage.get("seven_day_sonnet") or {}).get("utilization")
@@ -395,6 +521,8 @@ def main():
 
     print(f"Weekly limit (all models) | size=13 {C}")
     print(f"  {weekly:.0f}% used · resets in {fmt_reset(weekly_reset)} | size=13 {C}")
+    if ws_override is not None:
+        print(f"  ↻ pace start manually set to {ws_override.strftime('%b %-d %H:%M')} | {CD}")
 
     if pace:
         eh = pace["elapsed_h"]
@@ -475,6 +603,11 @@ def main():
     print(f"Updated {age_s}{' — STALE' if stale else ''} | {CD}")
     print("Open claude.ai/settings/usage | href=https://claude.ai/settings/usage")
     print("Refresh now | refresh=true")
+    print(f"Set pace start time… | shell={sys.executable} param1={SCRIPT} "
+          f"param2=--set-start terminal=false refresh=true")
+    if ws_override is not None:
+        print(f"Clear start-time override (back to auto) | shell={sys.executable} "
+              f"param1={SCRIPT} param2=--clear-start terminal=false refresh=true")
     print(f"Edit plugin | shell=/usr/bin/open param1=-a param2=TextEdit param3={SCRIPT} terminal=false")
 
 
