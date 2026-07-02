@@ -28,6 +28,8 @@ import os
 import subprocess
 import sys
 import time
+import urllib.error
+import urllib.request
 from datetime import datetime, timedelta, timezone, time as dtime
 from pathlib import Path
 
@@ -41,6 +43,7 @@ TOKEN_CACHE = Path.home() / ".cache" / "claude-usage-tokens.json"
 WEEKSTART_FILE = Path.home() / ".cache" / "claude-usage-weekstart.json"
 PROJECTS_DIR = Path.home() / ".claude" / "projects"
 STALE_AFTER = 600  # seconds — show a "stale" marker if older than this
+CCC_USAGE_URL = os.environ.get("CCC_USAGE_URL", "http://127.0.0.1:8090/api/usage/current")
 
 # Pace model: assume usage accrues only during your daily work window.
 # Defaults: 7am–8pm local, 7 days/week → 13×7 = 91 "work hours" per week.
@@ -86,6 +89,25 @@ def read_cache():
         return None
 
 
+def fetch_from_ccc():
+    try:
+        req = urllib.request.Request(CCC_USAGE_URL, headers={"Accept": "application/json"})
+        with urllib.request.urlopen(req, timeout=2) as res:
+            data = json.loads(res.read().decode("utf-8"))
+    except (OSError, urllib.error.URLError, TimeoutError, json.JSONDecodeError, ValueError):
+        return None
+    if not isinstance(data, dict) or not data.get("ok"):
+        return None
+    fetched_at = data.get("fetched_at")
+    try:
+        fetched_dt = parse_iso(fetched_at)
+        if (datetime.now(timezone.utc) - fetched_dt.astimezone(timezone.utc)).total_seconds() > STALE_AFTER:
+            return None
+    except Exception:
+        return None
+    return data
+
+
 def fmt_reset(iso_str):
     if not iso_str:
         return ""
@@ -105,6 +127,25 @@ def fmt_reset(iso_str):
         return f"{m}m"
     except Exception:
         return iso_str
+
+
+def fmt_reset_epoch(epoch):
+    """fmt_reset for a unix-epoch reset time (Codex uses epochs, not ISO)."""
+    if not epoch:
+        return ""
+    try:
+        return fmt_reset(datetime.fromtimestamp(epoch, tz=timezone.utc).isoformat())
+    except Exception:
+        return ""
+
+
+def bar_segment(icon, pct, pace):
+    """One menu-bar provider segment: 'icon weekly%·proj%' (proj omitted if N/A)."""
+    if pct is None:
+        return f"{icon} —"
+    if pace and pace["projected_pct"] is not None:
+        return f"{icon} {pct:.0f}%·{pace['projected_pct']:.0f}%"
+    return f"{icon} {pct:.0f}%"
 
 
 def status_for(pct):
@@ -281,16 +322,10 @@ def load_calibration():
         return None
 
 
-def pace_for(weekly_pct, weekly_resets_at_iso):
-    """Returns dict with elapsed_h, total_h, expected_pct, delta_pp, projected_pct, or None."""
-    if weekly_pct is None or not weekly_resets_at_iso:
-        return None
-    week_start_local = get_week_start(weekly_resets_at_iso)
-    if not week_start_local:
-        return None
-    try:
-        resets_local = parse_iso(weekly_resets_at_iso).astimezone()
-    except Exception:
+def compute_pace(weekly_pct, week_start_local, resets_local):
+    """Core pace math, provider-agnostic. Given a weekly %, the week-start and
+    the reset instant (both local datetimes), return the pace dict, or None."""
+    if weekly_pct is None or week_start_local is None or resets_local is None:
         return None
     now_local = datetime.now().astimezone()
     total_h = elapsed_work_hours(week_start_local, resets_local, WORK_START_HOUR, WORK_END_HOUR)
@@ -308,6 +343,88 @@ def pace_for(weekly_pct, weekly_resets_at_iso):
         "projected_pct": projected,
         "week_start": week_start_local,
     }
+
+
+def pace_for(weekly_pct, weekly_resets_at_iso):
+    """Claude pace: week-start comes from get_week_start (honors the manual override)."""
+    if weekly_pct is None or not weekly_resets_at_iso:
+        return None
+    week_start_local = get_week_start(weekly_resets_at_iso)
+    if not week_start_local:
+        return None
+    try:
+        resets_local = parse_iso(weekly_resets_at_iso).astimezone()
+    except Exception:
+        return None
+    return compute_pace(weekly_pct, week_start_local, resets_local)
+
+
+def codex_pace(weekly_pct, weekly_resets_epoch, window_minutes):
+    """Codex pace: week-start is the reset instant minus the rate-limit window
+    (no manual override — Codex's % is always live from local logs)."""
+    if weekly_pct is None or not weekly_resets_epoch:
+        return None
+    try:
+        resets_local = datetime.fromtimestamp(weekly_resets_epoch, tz=timezone.utc).astimezone()
+    except Exception:
+        return None
+    week_start_local = resets_local - timedelta(minutes=window_minutes or 10080)
+    return compute_pace(weekly_pct, week_start_local, resets_local)
+
+
+def pace_verdict(proj, OK, WARN, BAD, CD):
+    """(verdict_text, color) for a projection %. Shared by Claude and Codex."""
+    if proj is not None:
+        color = OK if proj <= 100 else (WARN if proj <= 110 else BAD)
+        if proj <= 100:
+            return f"on pace — projected {proj:.0f}% by week end", color
+        return f"BURNING FAST — projected {proj:.0f}% by week end", color
+    return "warming up — not enough work hours yet", CD
+
+
+def render_from_ccc(data):
+    C = "color=#cccccc"; CD = "color=#888888"; OK = "color=#00c853"; WARN = "color=#ffb300"; BAD = "color=#ff5252"
+    claude = data.get("claude") or {}
+    c7 = claude.get("seven_day") or {}
+    c5 = claude.get("five_hour") or {}
+    sonnet = claude.get("seven_day_sonnet") or {}
+    pace = claude.get("pace") or {}
+    weekly = c7.get("pct")
+    session = c5.get("pct")
+    codex = data.get("codex") or {}
+    cw = codex.get("weekly") or {}
+    cs = codex.get("session") or {}
+    codex_pace_d = codex.get("pace") or {}
+    codex_weekly = cw.get("pct")
+
+    bar = bar_segment("🤖", weekly, pace)
+    if codex_weekly is not None:
+        bar += "  " + bar_segment("⬡", codex_weekly, codex_pace_d)
+    print(bar)
+    print("---")
+    print(f"via CCC | size=11 {CD}")
+    print("---")
+    print(f"Claude weekly: {weekly:.0f}% used · resets in {fmt_reset(c7.get('resets_at'))} | size=13 {C}" if weekly is not None else f"Claude weekly: — | size=13 {C}")
+    if pace and pace.get("ok") and pace.get("projected_pct") is not None:
+        verdict, verdict_color = pace_verdict(pace.get("projected_pct"), OK, WARN, BAD, CD)
+        print(f"  projected {pace['projected_pct']:.0f}% by week end | {verdict_color}")
+        print(f"  {verdict} | {verdict_color}")
+    if session is not None:
+        print(f"5h session: {session:.0f}% used · resets in {fmt_reset(c5.get('resets_at'))} | {C}")
+    sonnet_pct = sonnet.get("pct")
+    if sonnet_pct is not None:
+        print(f"Sonnet weekly: {sonnet_pct:.0f}% used · resets in {fmt_reset(sonnet.get('resets_at'))} | {C}")
+    if codex_weekly is not None:
+        print("---")
+        plan = codex.get("plan_type")
+        print(f"Codex{f' ({plan})' if plan else ''} | size=13 {C}")
+        print(f"  {codex_weekly:.0f}% used · resets in {fmt_reset(cw.get('resets_at'))} | size=13 {C}")
+        if codex_pace_d and codex_pace_d.get("ok") and codex_pace_d.get("projected_pct") is not None:
+            verdict, verdict_color = pace_verdict(codex_pace_d.get("projected_pct"), OK, WARN, BAD, CD)
+            print(f"  projected {codex_pace_d['projected_pct']:.0f}% by week end | {verdict_color}")
+            print(f"  {verdict} | {verdict_color}")
+        if cs.get("pct") is not None:
+            print(f"  5h session: {cs['pct']:.0f}% used · resets in {fmt_reset(cs.get('resets_at'))} | {CD}")
 
 
 def _osascript_dialog(prompt, default_answer):
@@ -403,6 +520,11 @@ def main():
             cli_clear_start()
             return
 
+    ccc_usage = fetch_from_ccc()
+    if ccc_usage:
+        render_from_ccc(ccc_usage)
+        return
+
     fresh, err = fetch_via_chrome()
     estimated = False
 
@@ -473,26 +595,39 @@ def main():
 
     pace = pace_for(weekly, weekly_reset)
 
+    # Codex usage — read straight from local rollout logs (no Chrome needed)
+    codex = None
+    try:
+        sys.path.insert(0, str(SCRIPT.parent))
+        from _codex_lib import read_usage as codex_read_usage
+        codex = codex_read_usage()
+    except Exception:
+        codex = None
+    codex_weekly = codex_weekly_reset = codex_pace_d = None
+    codex_session = codex_session_reset = None
+    if codex:
+        cw = codex.get("weekly") or {}
+        codex_weekly = cw.get("pct")
+        codex_weekly_reset = cw.get("resets_at")
+        codex_pace_d = codex_pace(codex_weekly, codex_weekly_reset, cw.get("window_minutes"))
+        cs = codex.get("session") or {}
+        codex_session = cs.get("pct")
+        codex_session_reset = cs.get("resets_at")
+
     # Was the live fetch broken on this run?
     fetch_failed = (fresh is None)
     no_tab = bool(err and "no claude.ai tab" in (err or "").lower())
 
-    # Menu bar headline: weekly %, color by projection (the "will I make it" signal)
-    if pace and pace["projected_pct"] is not None:
-        proj = pace["projected_pct"]
-        # Projection thresholds: < 85% = comfortable, < 100 = tight, < 115 = overshoot, else danger
-        if proj < 85:    bar_emoji = "🟢"
-        elif proj < 100: bar_emoji = "🟡"
-        elif proj < 115: bar_emoji = "🟠"
-        else:            bar_emoji = "🔴"
-        bar = f"{bar_emoji} {weekly:.0f}% · {proj:.0f}% proj"
-    else:
-        bar = f"{status_for(weekly)} {weekly:.0f}%"
+    # Menu bar headline: icon-tagged weekly%·projection per provider
+    # (🤖 Claude, ⬡ Codex). Health colors live in the dropdown.
+    bar = bar_segment("🤖", weekly, pace)
     if estimated:
-        bar += " ~est"
+        bar += "~est"
+    if codex_weekly is not None:
+        bar += "  " + bar_segment("⬡", codex_weekly, codex_pace_d)
     if stale:
         bar += " (stale)"
-    # Stale > 1 hour or fetch failure → louder warning prefix
+    # Stale > 1 hour or fetch failure → louder warning prefix (Claude live fetch)
     cache_age = time.time() - fetched_at
     if fetch_failed and cache_age > 3600:
         bar = "⚠️ " + bar
@@ -531,16 +666,7 @@ def main():
         exp = pace["expected_pct"]
         delta = pace["delta_pp"]
         proj = pace["projected_pct"]
-        # Pace verdict: based on projection, fallback to delta
-        if proj is not None:
-            verdict_color = OK if proj <= 100 else (WARN if proj <= 110 else BAD)
-            if proj <= 100:
-                verdict = f"on pace — projected {proj:.0f}% by week end"
-            else:
-                verdict = f"BURNING FAST — projected {proj:.0f}% by week end"
-        else:
-            verdict_color = CD
-            verdict = "warming up — not enough work hours yet"
+        verdict, verdict_color = pace_verdict(proj, OK, WARN, BAD, CD)
         print(f"  Used {weekly:.0f}% · expected {exp:.0f}% · Δ {delta:+.0f}pp | {C}")
         print(f"  {verdict} | {verdict_color}")
         print(f"  Worked {eh:.1f}h · {hours_left:.1f}h left (of {th:.1f}h total, {WORK_START_HOUR}:00–{WORK_END_HOUR}:00 daily) | {CD}")
@@ -565,6 +691,28 @@ def main():
         print("---")
         print(f"Extra usage ({'on' if enabled else 'off'}) | size=13 {C}")
         print(f"  {cur} {used:,.2f} of {cur} {cap:,.0f} ({epct:.1f}%) | {CD}")
+
+    # Codex — weekly + pace + 5h session, mirroring the Claude blocks above
+    if codex_weekly is not None:
+        print("---")
+        plan = codex.get("plan_type")
+        print(f"Codex{f' ({plan})' if plan else ''} | size=13 {C}")
+        print(f"  {codex_weekly:.0f}% used · resets in {fmt_reset_epoch(codex_weekly_reset)} | size=13 {C}")
+        if codex_pace_d:
+            eh = codex_pace_d["elapsed_h"]
+            th = codex_pace_d["total_h"]
+            hours_left = codex_pace_d["hours_left"]
+            exp = codex_pace_d["expected_pct"]
+            delta = codex_pace_d["delta_pp"]
+            proj = codex_pace_d["projected_pct"]
+            verdict, verdict_color = pace_verdict(proj, OK, WARN, BAD, CD)
+            print(f"  Used {codex_weekly:.0f}% · expected {exp:.0f}% · Δ {delta:+.0f}pp | {C}")
+            print(f"  {verdict} | {verdict_color}")
+            print(f"  Worked {eh:.1f}h · {hours_left:.1f}h left (of {th:.1f}h total, {WORK_START_HOUR}:00–{WORK_END_HOUR}:00 daily) | {CD}")
+        if codex_session is not None:
+            print(f"  5h session: {codex_session:.0f}% used · resets in {fmt_reset_epoch(codex_session_reset)} | {CD}")
+        if codex.get("from_cache"):
+            print(f"  (showing last Codex snapshot — no recent activity) | {CD}")
 
     # Active sessions — context-fill snapshot for /compact warnings
     try:
