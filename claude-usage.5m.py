@@ -98,6 +98,18 @@ def fetch_from_ccc():
         return None
     if not isinstance(data, dict) or not data.get("ok"):
         return None
+    claude = data.get("claude") or {}
+    weekly = claude.get("seven_day") or {}
+    session = claude.get("five_hour") or {}
+    pace = claude.get("pace") or {}
+    if (
+        weekly.get("pct") is None
+        or not weekly.get("resets_at")
+        or session.get("pct") is None
+        or not session.get("resets_at")
+        or not pace.get("ok")
+    ):
+        return None
     fetched_at = data.get("fetched_at")
     try:
         fetched_dt = parse_iso(fetched_at)
@@ -106,6 +118,26 @@ def fetch_from_ccc():
     except Exception:
         return None
     return data
+
+
+def usage_from_ccc(data):
+    """Normalize CCC's Claude fields to the direct Anthropic response shape."""
+    claude = data.get("claude") or {}
+
+    def window(name):
+        source = claude.get(name) or {}
+        return {
+            "utilization": source.get("pct"),
+            "resets_at": source.get("resets_at"),
+        }
+
+    return {
+        "five_hour": window("five_hour"),
+        "seven_day": window("seven_day"),
+        "seven_day_sonnet": window("seven_day_sonnet"),
+        "seven_day_opus": window("seven_day_opus"),
+        "extra_usage": claude.get("extra_usage") or {},
+    }
 
 
 def fmt_reset(iso_str):
@@ -134,6 +166,8 @@ def fmt_reset_epoch(epoch):
     if not epoch:
         return ""
     try:
+        if isinstance(epoch, str):
+            return fmt_reset(epoch)
         return fmt_reset(datetime.fromtimestamp(epoch, tz=timezone.utc).isoformat())
     except Exception:
         return ""
@@ -365,7 +399,10 @@ def codex_pace(weekly_pct, weekly_resets_epoch, window_minutes):
     if weekly_pct is None or not weekly_resets_epoch:
         return None
     try:
-        resets_local = datetime.fromtimestamp(weekly_resets_epoch, tz=timezone.utc).astimezone()
+        if isinstance(weekly_resets_epoch, str):
+            resets_local = parse_iso(weekly_resets_epoch).astimezone()
+        else:
+            resets_local = datetime.fromtimestamp(weekly_resets_epoch, tz=timezone.utc).astimezone()
     except Exception:
         return None
     week_start_local = resets_local - timedelta(minutes=window_minutes or 10080)
@@ -380,51 +417,6 @@ def pace_verdict(proj, OK, WARN, BAD, CD):
             return f"on pace — projected {proj:.0f}% by week end", color
         return f"BURNING FAST — projected {proj:.0f}% by week end", color
     return "warming up — not enough work hours yet", CD
-
-
-def render_from_ccc(data):
-    C = "color=#cccccc"; CD = "color=#888888"; OK = "color=#00c853"; WARN = "color=#ffb300"; BAD = "color=#ff5252"
-    claude = data.get("claude") or {}
-    c7 = claude.get("seven_day") or {}
-    c5 = claude.get("five_hour") or {}
-    sonnet = claude.get("seven_day_sonnet") or {}
-    pace = claude.get("pace") or {}
-    weekly = c7.get("pct")
-    session = c5.get("pct")
-    codex = data.get("codex") or {}
-    cw = codex.get("weekly") or {}
-    cs = codex.get("session") or {}
-    codex_pace_d = codex.get("pace") or {}
-    codex_weekly = cw.get("pct")
-
-    bar = bar_segment("🤖", weekly, pace)
-    if codex_weekly is not None:
-        bar += "  " + bar_segment("⬡", codex_weekly, codex_pace_d)
-    print(bar)
-    print("---")
-    print(f"via CCC | size=11 {CD}")
-    print("---")
-    print(f"Claude weekly: {weekly:.0f}% used · resets in {fmt_reset(c7.get('resets_at'))} | size=13 {C}" if weekly is not None else f"Claude weekly: — | size=13 {C}")
-    if pace and pace.get("ok") and pace.get("projected_pct") is not None:
-        verdict, verdict_color = pace_verdict(pace.get("projected_pct"), OK, WARN, BAD, CD)
-        print(f"  projected {pace['projected_pct']:.0f}% by week end | {verdict_color}")
-        print(f"  {verdict} | {verdict_color}")
-    if session is not None:
-        print(f"5h session: {session:.0f}% used · resets in {fmt_reset(c5.get('resets_at'))} | {C}")
-    sonnet_pct = sonnet.get("pct")
-    if sonnet_pct is not None:
-        print(f"Sonnet weekly: {sonnet_pct:.0f}% used · resets in {fmt_reset(sonnet.get('resets_at'))} | {C}")
-    if codex_weekly is not None:
-        print("---")
-        plan = codex.get("plan_type")
-        print(f"Codex{f' ({plan})' if plan else ''} | size=13 {C}")
-        print(f"  {codex_weekly:.0f}% used · resets in {fmt_reset(cw.get('resets_at'))} | size=13 {C}")
-        if codex_pace_d and codex_pace_d.get("ok") and codex_pace_d.get("projected_pct") is not None:
-            verdict, verdict_color = pace_verdict(codex_pace_d.get("projected_pct"), OK, WARN, BAD, CD)
-            print(f"  projected {codex_pace_d['projected_pct']:.0f}% by week end | {verdict_color}")
-            print(f"  {verdict} | {verdict_color}")
-        if cs.get("pct") is not None:
-            print(f"  5h session: {cs['pct']:.0f}% used · resets in {fmt_reset(cs.get('resets_at'))} | {CD}")
 
 
 def _osascript_dialog(prompt, default_answer):
@@ -522,28 +514,32 @@ def main():
 
     ccc_usage = fetch_from_ccc()
     if ccc_usage:
-        render_from_ccc(ccc_usage)
-        return
-
-    fresh, err = fetch_via_chrome()
+        fresh, err = usage_from_ccc(ccc_usage), None
+    else:
+        fresh, err = fetch_via_chrome()
     estimated = False
 
     if fresh is not None:
-        write_cache(fresh)
+        if not ccc_usage:
+            write_cache(fresh)
         usage = fresh
-        fetched_at = time.time()
+        fetched_at = (
+            parse_iso(ccc_usage["fetched_at"]).timestamp()
+            if ccc_usage else time.time()
+        )
         stale = False
         # Calibrate: pair (this week's local tokens) with (real weekly %)
-        try:
-            sd = (fresh.get("seven_day") or {})
-            if sd.get("resets_at") and sd.get("utilization") is not None:
-                ws = get_week_start(sd["resets_at"])
-                if ws:
-                    tokens = count_week_tokens(ws)
-                    if tokens > 0:
-                        save_calibration(ws, tokens, sd["utilization"])
-        except Exception:
-            pass
+        if not ccc_usage:
+            try:
+                sd = (fresh.get("seven_day") or {})
+                if sd.get("resets_at") and sd.get("utilization") is not None:
+                    ws = get_week_start(sd["resets_at"])
+                    if ws:
+                        tokens = count_week_tokens(ws)
+                        if tokens > 0:
+                            save_calibration(ws, tokens, sd["utilization"])
+            except Exception:
+                pass
     else:
         cached = read_cache()
         if not cached:
@@ -583,7 +579,7 @@ def main():
 
     weekly = (usage.get("seven_day") or {}).get("utilization")
     weekly_reset = (usage.get("seven_day") or {}).get("resets_at")
-    ws_override = active_weekstart_override(weekly_reset)
+    ws_override = None if ccc_usage else active_weekstart_override(weekly_reset)
     session = (usage.get("five_hour") or {}).get("utilization")
     session_reset = (usage.get("five_hour") or {}).get("resets_at")
     sonnet = (usage.get("seven_day_sonnet") or {}).get("utilization")
@@ -593,23 +589,36 @@ def main():
     opus_reset = opus.get("resets_at") if opus else None
     extra = usage.get("extra_usage") or {}
 
-    pace = pace_for(weekly, weekly_reset)
+    if ccc_usage:
+        pace = (ccc_usage.get("claude") or {}).get("pace") or None
+    else:
+        pace = pace_for(weekly, weekly_reset)
 
-    # Codex usage — read straight from local rollout logs (no Chrome needed)
-    codex = None
+    # Prefer a fresh local Codex snapshot over CCC. CCC can remain fresh for
+    # Claude while its independently sourced Codex snapshot has gone stale.
+    local_codex = None
     try:
         sys.path.insert(0, str(SCRIPT.parent))
         from _codex_lib import read_usage as codex_read_usage
-        codex = codex_read_usage()
+        local_codex = codex_read_usage()
     except Exception:
-        codex = None
+        local_codex = None
+    ccc_codex = (ccc_usage.get("codex") or None) if ccc_usage else None
+    if local_codex and not local_codex.get("from_cache"):
+        codex = local_codex
+    else:
+        codex = ccc_codex or local_codex
     codex_weekly = codex_weekly_reset = codex_pace_d = None
     codex_session = codex_session_reset = None
     if codex:
         cw = codex.get("weekly") or {}
         codex_weekly = cw.get("pct")
         codex_weekly_reset = cw.get("resets_at")
-        codex_pace_d = codex_pace(codex_weekly, codex_weekly_reset, cw.get("window_minutes"))
+        codex_pace_d = codex_pace(
+            codex_weekly,
+            codex_weekly_reset,
+            cw.get("window_minutes"),
+        )
         cs = codex.get("session") or {}
         codex_session = cs.get("pct")
         codex_session_reset = cs.get("resets_at")
