@@ -136,8 +136,47 @@ def usage_from_ccc(data):
         "seven_day": window("seven_day"),
         "seven_day_sonnet": window("seven_day_sonnet"),
         "seven_day_opus": window("seven_day_opus"),
+        "seven_day_fable": window("seven_day_fable"),
         "extra_usage": claude.get("extra_usage") or {},
     }
+
+
+def scoped_weekly_from_limits(usage):
+    """Per-model weekly buckets hiding in the payload's `limits` array.
+
+    The settings/usage API often has null seven_day_<model> fields while the
+    same number rides along as a weekly_scoped limit with a model scope
+    (observed for Fable). Returns {family_lower: {utilization, resets_at}}."""
+    out = {}
+    for lim in usage.get("limits") or []:
+        if lim.get("kind") != "weekly_scoped":
+            continue
+        model = (lim.get("scope") or {}).get("model") or {}
+        name = (model.get("display_name") or "").strip().lower()
+        if name and lim.get("percent") is not None:
+            out[name] = {
+                "utilization": lim.get("percent"),
+                "resets_at": lim.get("resets_at"),
+            }
+    return out
+
+
+def burn_shares_for_week(weekly_reset_iso):
+    """{family: fraction-of-burn} from local transcripts over the API week
+    (reset minus 7 days — deliberately ignores the manual pace override so the
+    split always matches Anthropic's counting window). None on any failure."""
+    if not weekly_reset_iso:
+        return None
+    try:
+        week_start = parse_iso(weekly_reset_iso).astimezone() - timedelta(days=7)
+        sys.path.insert(0, str(SCRIPT.parent))
+        from usage_by_model import usage_by_model
+        fams = usage_by_model(week_start)
+    except Exception:
+        return None
+    if not (fams.get("_total") or {}).get("burn"):
+        return None
+    return {k: v["share"] for k, v in fams.items() if k != "_total"}
 
 
 def fmt_reset(iso_str):
@@ -503,6 +542,45 @@ def cli_clear_start():
         pass
 
 
+def _load_goal_lib():
+    sys.path.insert(0, str(SCRIPT.parent))
+    import goal as goal_lib
+    return goal_lib
+
+
+def cli_set_goal():
+    """Prompt for a usage goal and persist it via goal.py."""
+    try:
+        goal_lib = _load_goal_lib()
+    except Exception as e:
+        _osascript_alert(f"goal.py unavailable: {e}")
+        return
+    ans = _osascript_dialog(
+        "Set a usage goal.\n"
+        "Format: <pct>% by <HH:MM or ISO datetime>[, <family>>=<pct>%]\n"
+        "e.g. 100% by 10:00, fable>=50%",
+        "100% by 10:00, fable>=50%",
+    )
+    if not ans:
+        return  # cancelled
+    try:
+        parsed = goal_lib.parse_goal_string(ans)
+    except ValueError as e:
+        _osascript_alert(f"Couldn't parse goal: {e}")
+        return
+    try:
+        goal_lib.save_goal(parsed)
+    except Exception as e:
+        _osascript_alert(f"Couldn't save goal: {e}")
+
+
+def cli_clear_goal():
+    try:
+        _load_goal_lib().clear_goal()
+    except Exception:
+        pass
+
+
 def main():
     if len(sys.argv) > 1:
         if sys.argv[1] == "--set-start":
@@ -510,6 +588,12 @@ def main():
             return
         if sys.argv[1] == "--clear-start":
             cli_clear_start()
+            return
+        if sys.argv[1] == "--set-goal":
+            cli_set_goal()
+            return
+        if sys.argv[1] == "--clear-goal":
+            cli_clear_goal()
             return
 
     ccc_usage = fetch_from_ccc()
@@ -582,11 +666,16 @@ def main():
     ws_override = None if ccc_usage else active_weekstart_override(weekly_reset)
     session = (usage.get("five_hour") or {}).get("utilization")
     session_reset = (usage.get("five_hour") or {}).get("resets_at")
-    sonnet = (usage.get("seven_day_sonnet") or {}).get("utilization")
-    sonnet_reset = (usage.get("seven_day_sonnet") or {}).get("resets_at")
-    opus = (usage.get("seven_day_opus") or {})
-    opus_pct = opus.get("utilization") if opus else None
-    opus_reset = opus.get("resets_at") if opus else None
+    # Per-model weekly buckets: explicit seven_day_<family> fields win, the
+    # limits array fills the gaps (Fable currently only appears there).
+    model_weekly = scoped_weekly_from_limits(usage)
+    for fam in ("sonnet", "opus", "fable"):
+        bucket = usage.get(f"seven_day_{fam}") or {}
+        if bucket.get("utilization") is not None:
+            model_weekly[fam] = {
+                "utilization": bucket["utilization"],
+                "resets_at": bucket.get("resets_at"),
+            }
     extra = usage.get("extra_usage") or {}
 
     if ccc_usage:
@@ -680,12 +769,54 @@ def main():
         print(f"  {verdict} | {verdict_color}")
         print(f"  Worked {eh:.1f}h · {hours_left:.1f}h left (of {th:.1f}h total, {WORK_START_HOUR}:00–{WORK_END_HOUR}:00 daily) | {CD}")
 
-    if sonnet is not None:
-        print(f"Weekly Sonnet only | size=13 {C}")
-        print(f"  {sonnet:.0f}% used · resets in {fmt_reset(sonnet_reset)} | {CD}")
-    if opus_pct is not None:
-        print(f"Weekly Opus only | size=13 {C}")
-        print(f"  {opus_pct:.0f}% used · resets in {fmt_reset(opus_reset)} | {CD}")
+    # Goal burn-down + model split (goal needs the burn shares for its
+    # model-share floors, so compute shares once here).
+    shares = burn_shares_for_week(weekly_reset)
+    try:
+        goal_lib = _load_goal_lib()
+        goal_cfg = goal_lib.load_goal()
+    except Exception:
+        goal_lib = goal_cfg = None
+
+    if goal_cfg:
+        st = goal_lib.goal_status(goal_cfg, weekly, (pace or {}).get("elapsed_h"), shares)
+        print("---")
+        dl_s = st["deadline"].astimezone().strftime("%b %-d %H:%M")
+        print(f"🎯 Goal: {st['target_pct']:.0f}% by {dl_s} | size=13 {C}")
+        if st["achieved"]:
+            print(f"  ✅ achieved — at {weekly:.0f}% | {OK}")
+        elif st["expired"]:
+            end_s = f"{weekly:.0f}%" if weekly is not None else "?"
+            print(f"  ⏰ expired — ended at {end_s} (target {st['target_pct']:.0f}%) | {WARN}")
+        else:
+            if st["projected_pct"] is not None:
+                word, col = ("on track", OK) if st["on_track"] else ("BEHIND", BAD)
+                print(f"  {word} — projected {st['projected_pct']:.0f}% at deadline | {col}")
+            if st["required_pace"] is not None and st["current_pace"] is not None:
+                print(f"  need {st['required_pace']:.1f}pp/h · burning {st['current_pace']:.1f}pp/h "
+                      f"· {st['hours_to_deadline']:.1f} work-h left | {CD}")
+            elif st["projected_pct"] is None:
+                print(f"  no burn data yet — can't project | {CD}")
+        for fam, ms in st["model_share"].items():
+            if ms["current_pct"] is None:
+                print(f"  {fam} ≥{ms['target_pct']:.0f}% of burn: no local data | {CD}")
+            else:
+                mark, col = ("✓", OK) if ms["met"] else ("✗", BAD)
+                print(f"  {mark} {fam} {ms['current_pct']:.0f}% of burn (target ≥{ms['target_pct']:.0f}%) | {col}")
+
+    if model_weekly or shares:
+        print("---")
+        print(f"Model split — this week | size=13 {C}")
+        fams = sorted(
+            set(model_weekly) | set(shares or {}),
+            key=lambda f: -(shares or {}).get(f, 0.0),
+        )
+        for fam in fams:
+            cap = (model_weekly.get(fam) or {}).get("utilization")
+            cap_s = f"{cap:.0f}% of its cap" if cap is not None else "cap —"
+            share = (shares or {}).get(fam)
+            share_s = f"{share * 100:4.0f}% of burn" if share is not None else "burn —"
+            print(f"  {fam.capitalize():<7} {share_s} · {cap_s} | font=Menlo {CD}")
 
     print("---")
     print(f"Current 5h session | size=13 {C}")
@@ -760,6 +891,11 @@ def main():
     print(f"Updated {age_s}{' — STALE' if stale else ''} | {CD}")
     print("Open claude.ai/settings/usage | href=https://claude.ai/settings/usage")
     print("Refresh now | refresh=true")
+    print(f"Set goal… | shell={sys.executable} param1={SCRIPT} "
+          f"param2=--set-goal terminal=false refresh=true")
+    if goal_cfg:
+        print(f"Clear goal | shell={sys.executable} param1={SCRIPT} "
+              f"param2=--clear-goal terminal=false refresh=true")
     print(f"Set pace start time… | shell={sys.executable} param1={SCRIPT} "
           f"param2=--set-start terminal=false refresh=true")
     if ws_override is not None:

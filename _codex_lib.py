@@ -23,8 +23,10 @@ import json
 import os
 from pathlib import Path
 
-SESSIONS_DIR = Path.home() / ".codex" / "sessions"
-CACHE = Path.home() / ".cache" / "codex-usage.json"
+SESSIONS_DIR = Path(os.environ.get("CODEX_SESSIONS_DIR")
+                    or Path.home() / ".codex" / "sessions")
+CACHE = Path(os.environ.get("CODEX_USAGE_CACHE")
+             or Path.home() / ".cache" / "codex-usage.json")
 SCAN_DAYS = 9  # only inspect rollout files modified within this window
 
 

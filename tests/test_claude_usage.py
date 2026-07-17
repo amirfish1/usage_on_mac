@@ -3,6 +3,7 @@ import importlib.util
 import os
 import subprocess
 import sys
+import tempfile
 import threading
 import unittest
 from contextlib import redirect_stdout
@@ -111,15 +112,22 @@ class ClaudeUsageOutputTest(unittest.TestCase):
         try:
             env = os.environ.copy()
             env["CCC_USAGE_URL"] = f"http://127.0.0.1:{server.server_port}/api/usage/current"
-            proc = subprocess.run(
-                [str(PLUGIN)],
-                cwd=ROOT,
-                env=env,
-                capture_output=True,
-                text=True,
-                timeout=10,
-                check=True,
-            )
+            # Keep the subprocess hermetic: no real transcripts or goal file.
+            with tempfile.TemporaryDirectory() as tmp:
+                env["CLAUDE_PROJECTS_DIR"] = tmp
+                env["CLAUDE_USAGE_MODEL_CACHE"] = os.path.join(tmp, "cache.json")
+                env["CLAUDE_USAGE_GOAL_FILE"] = os.path.join(tmp, "goal.json")
+                env["CODEX_SESSIONS_DIR"] = tmp
+                env["CODEX_USAGE_CACHE"] = os.path.join(tmp, "codex.json")
+                proc = subprocess.run(
+                    [str(PLUGIN)],
+                    cwd=ROOT,
+                    env=env,
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
+                    check=True,
+                )
         finally:
             server.shutdown()
             server.server_close()
@@ -169,6 +177,8 @@ class ClaudeUsageOutputTest(unittest.TestCase):
 
         with (
             mock.patch.object(plugin, "fetch_from_ccc", return_value=ccc),
+            mock.patch.object(plugin, "burn_shares_for_week", return_value=None),
+            mock.patch.object(plugin, "_load_goal_lib", side_effect=ImportError),
             mock.patch.dict(sys.modules, {"_codex_lib": fake_codex_module}),
             redirect_stdout(output),
         ):
