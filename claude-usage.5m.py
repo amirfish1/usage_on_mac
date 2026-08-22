@@ -45,6 +45,12 @@ PROJECTS_DIR = Path.home() / ".claude" / "projects"
 STALE_AFTER = 600  # seconds — show a "stale" marker if older than this
 CCC_USAGE_URL = os.environ.get("CCC_USAGE_URL", "http://127.0.0.1:8090/api/usage/current")
 
+# xbar renders any dropdown line with no href=/shell=/refresh= action as a
+# disabled NSMenuItem, which macOS always draws dimmed regardless of a
+# custom color — a harmless no-op shell action is the only way to get
+# purely-informational rows to render at full brightness.
+NOOP = "shell=/usr/bin/true terminal=false"
+
 # Pace model: assume usage accrues only during your daily work window.
 # Defaults: 7am–8pm local, 7 days/week → 13×7 = 91 "work hours" per week.
 # Tweak as your real rhythm shifts.
@@ -212,12 +218,36 @@ def fmt_reset_epoch(epoch):
         return ""
 
 
-def bar_segment(icon, pct, pace):
-    """One menu-bar provider segment: 'icon weekly%·proj%' (proj omitted if N/A)."""
+def days_until(resets_at):
+    """Whole days from now until an ISO or unix-epoch reset timestamp, or None."""
+    if not resets_at:
+        return None
+    try:
+        if isinstance(resets_at, str):
+            t = datetime.fromisoformat(resets_at.replace("Z", "+00:00"))
+        else:
+            t = datetime.fromtimestamp(resets_at, tz=timezone.utc)
+        secs = (t - datetime.now(timezone.utc)).total_seconds()
+        return max(0, int(secs // 86400))
+    except Exception:
+        return None
+
+
+def bar_segment(icon, pct, pace, resets_at=None):
+    """One menu-bar provider segment: 'icon weekly%·proj%' (proj omitted if N/A).
+
+    Once a limit is hit (pct >= 100), a projection is meaningless — swap it
+    for days left until the limit resets instead.
+    """
     if pct is None:
         return f"{icon} —"
+    if pct >= 100:
+        d = days_until(resets_at)
+        if d is not None:
+            return f"{icon} {pct:.0f}%·{d}d"
+        return f"{icon} {pct:.0f}%"
     if pace and pace["projected_pct"] is not None:
-        return f"{icon} {pct:.0f}%·{pace['projected_pct']:.0f}%"
+        return f"{icon} {pct:.0f}%·{pace['projected_pct']:.0f}"
     return f"{icon} {pct:.0f}%"
 
 
@@ -448,14 +478,18 @@ def codex_pace(weekly_pct, weekly_resets_epoch, window_minutes):
     return compute_pace(weekly_pct, week_start_local, resets_local)
 
 
-def pace_verdict(proj, OK, WARN, BAD, CD):
-    """(verdict_text, color) for a projection %. Shared by Claude and Codex."""
+def pace_verdict(proj, OK, WARN, BAD):
+    """(verdict_text, color) for a projection %. Shared by Claude and Codex.
+
+    color is "" (no attribute — plain, full-contrast default text) when
+    there's no real status to convey, so neutral rows never get forced into
+    xbar's dimmer custom-color rendering."""
     if proj is not None:
         color = OK if proj <= 100 else (WARN if proj <= 110 else BAD)
         if proj <= 100:
             return f"on pace — projected {proj:.0f}% by week end", color
         return f"BURNING FAST — projected {proj:.0f}% by week end", color
-    return "warming up — not enough work hours yet", CD
+    return "warming up — not enough work hours yet", ""
 
 
 def _osascript_dialog(prompt, default_answer):
@@ -542,43 +576,22 @@ def cli_clear_start():
         pass
 
 
-def _load_goal_lib():
-    sys.path.insert(0, str(SCRIPT.parent))
-    import goal as goal_lib
-    return goal_lib
-
-
-def cli_set_goal():
-    """Prompt for a usage goal and persist it via goal.py."""
-    try:
-        goal_lib = _load_goal_lib()
-    except Exception as e:
-        _osascript_alert(f"goal.py unavailable: {e}")
-        return
-    ans = _osascript_dialog(
-        "Set a usage goal.\n"
-        "Format: <pct>% by <HH:MM or ISO datetime>[, <family>>=<pct>%]\n"
-        "e.g. 100% by 10:00, fable>=50%",
-        "100% by 10:00, fable>=50%",
-    )
-    if not ans:
-        return  # cancelled
-    try:
-        parsed = goal_lib.parse_goal_string(ans)
-    except ValueError as e:
-        _osascript_alert(f"Couldn't parse goal: {e}")
-        return
-    try:
-        goal_lib.save_goal(parsed)
-    except Exception as e:
-        _osascript_alert(f"Couldn't save goal: {e}")
-
-
-def cli_clear_goal():
-    try:
-        _load_goal_lib().clear_goal()
-    except Exception:
-        pass
+def format_proj_dir(proj_dir: str, max_len: int = 28) -> str:
+    """Format project directory names cleanly for menu dropdown."""
+    if not proj_dir:
+        return ""
+    s = proj_dir.lstrip("-")
+    home = Path.home()
+    home_prefix = str(home).strip("/").replace("/", "-")
+    if s.startswith(home_prefix + "-"):
+        s = "~/" + s[len(home_prefix) + 1:]
+    elif s.startswith("Users-"):
+        parts = s.split("-", 2)
+        if len(parts) == 3:
+            s = "~/" + parts[2]
+    if len(s) > max_len:
+        s = "..." + s[-(max_len - 3):]
+    return s
 
 
 def main():
@@ -588,12 +601,6 @@ def main():
             return
         if sys.argv[1] == "--clear-start":
             cli_clear_start()
-            return
-        if sys.argv[1] == "--set-goal":
-            cli_set_goal()
-            return
-        if sys.argv[1] == "--clear-goal":
-            cli_clear_goal()
             return
 
     ccc_usage = fetch_from_ccc()
@@ -629,7 +636,7 @@ def main():
         if not cached:
             print("🤖 ?")
             print("---")
-            print(f"Can't fetch usage: {err} | color=red")
+            print(f"Can't fetch usage: {err} | color=red {NOOP}")
             print("Need Chrome Beta open with a claude.ai tab logged in.")
             print("Also: Chrome Beta → View → Developer → Allow JavaScript from Apple Events")
             print("---")
@@ -712,17 +719,40 @@ def main():
         codex_session = cs.get("pct")
         codex_session_reset = cs.get("resets_at")
 
+    # Kimi (Kimi Code CLI) usage via its local OAuth token + usages API.
+    kimi = None
+    try:
+        sys.path.insert(0, str(SCRIPT.parent))
+        from _kimi_lib import read_usage as kimi_read_usage
+        kimi = kimi_read_usage()
+    except Exception:
+        kimi = None
+    kimi_weekly = kimi_weekly_reset = kimi_pace_d = None
+    kimi_session = kimi_session_reset = None
+    kimi_extra = None
+    if kimi:
+        kw = kimi.get("weekly") or {}
+        kimi_weekly = kw.get("pct")
+        kimi_weekly_reset = kw.get("resets_at")
+        kimi_pace_d = codex_pace(kimi_weekly, kimi_weekly_reset, 10080)
+        ks = kimi.get("session") or {}
+        kimi_session = ks.get("pct")
+        kimi_session_reset = ks.get("resets_at")
+        kimi_extra = kimi.get("extra")
+
     # Was the live fetch broken on this run?
     fetch_failed = (fresh is None)
     no_tab = bool(err and "no claude.ai tab" in (err or "").lower())
 
     # Menu bar headline: icon-tagged weekly%·projection per provider
     # (🤖 Claude, ⬡ Codex). Health colors live in the dropdown.
-    bar = bar_segment("🤖", weekly, pace)
+    bar = bar_segment("🤖", weekly, pace, weekly_reset)
     if estimated:
         bar += "~est"
     if codex_weekly is not None:
-        bar += "  " + bar_segment("⬡", codex_weekly, codex_pace_d)
+        bar += " " + bar_segment("⬡", codex_weekly, codex_pace_d, codex_weekly_reset)
+    if kimi_weekly is not None:
+        bar += " " + bar_segment("🌙", kimi_weekly, kimi_pace_d, kimi_weekly_reset)
     if stale:
         bar += " (stale)"
     # Stale > 1 hour or fetch failure → louder warning prefix (Claude live fetch)
@@ -739,23 +769,22 @@ def main():
         cause = "no claude.ai tab in Chrome Beta" if no_tab else (err or "fetch error")
         age_min = int(cache_age // 60)
         print(f"⚠️ Live fetch failing — {cause} | size=13 color=#c0392b,#ff7b7b")
-        print(f"  Last real data: {age_min}m ago · showing {'estimate' if estimated else 'cached value'} | color=#666666,#cfcfcf")
+        print(f"--  Last real data: {age_min}m ago · showing {'estimate' if estimated else 'cached value'} | {NOOP}")
         print("Open claude.ai in Chrome Beta (re-enables live data) | "
               "shell=/bin/bash param1=-lc "
               "param2=\"open -a 'Google Chrome Beta' https://claude.ai/settings/usage\" "
               "terminal=false refresh=true")
         print("---")
 
-    C = "color=#1a1a1a,#ffffff"
-    CD = "color=#666666,#cfcfcf"
     OK = "color=#0a7d20,#5dd66d"
     WARN = "color=#b8860b,#e6c200"
     BAD = "color=#c0392b,#ff7b7b"
 
-    print(f"Weekly limit (all models) | size=13 {C}")
-    print(f"  {weekly:.0f}% used · resets in {fmt_reset(weekly_reset)} | size=13 {C}")
+    # 🤖 Claude Section
+    print(f"🤖 Claude (Weekly limit all models) | size=13")
+    print(f"--  {weekly:.0f}% used · resets in {fmt_reset(weekly_reset)} | size=13 {NOOP}")
     if ws_override is not None:
-        print(f"  ↻ pace start manually set to {ws_override.strftime('%b %-d %H:%M')} | {CD}")
+        print(f"--  ↻ pace start manually set to {ws_override.strftime('%b %-d %H:%M')} | {NOOP}")
 
     if pace:
         eh = pace["elapsed_h"]
@@ -764,49 +793,25 @@ def main():
         exp = pace["expected_pct"]
         delta = pace["delta_pp"]
         proj = pace["projected_pct"]
-        verdict, verdict_color = pace_verdict(proj, OK, WARN, BAD, CD)
-        print(f"  Used {weekly:.0f}% · expected {exp:.0f}% · Δ {delta:+.0f}pp | {C}")
-        print(f"  {verdict} | {verdict_color}")
-        print(f"  Worked {eh:.1f}h · {hours_left:.1f}h left (of {th:.1f}h total, {WORK_START_HOUR}:00–{WORK_END_HOUR}:00 daily) | {CD}")
+        verdict, verdict_color = pace_verdict(proj, OK, WARN, BAD)
+        print(f"--  {verdict}" + (f" | {verdict_color} {NOOP}" if verdict_color else f" | {NOOP}"))
+        print(f"--  expected {exp:.0f}% · Δ {delta:+.0f}pp · Worked {eh:.1f}h · {hours_left:.1f}h left | {NOOP}")
 
-    # Goal burn-down + model split (goal needs the burn shares for its
-    # model-share floors, so compute shares once here).
+    if session is not None:
+        print(f"--  5h session: {session:.0f}% used · resets in {fmt_reset(session_reset)} | {NOOP}")
+
+    if extra:
+        used = extra.get("used_credits", 0) / 100.0
+        cap = extra.get("monthly_limit", 0) / 100.0
+        epct = extra.get("utilization", 0) or 0
+        enabled = extra.get("is_enabled")
+        cur = extra.get("currency", "USD")
+        print(f"--  Extra usage ({'on' if enabled else 'off'}): {cur} {used:,.2f} of {cur} {cap:,.0f} ({epct:.1f}%) | {NOOP}")
+
+    # Model split — nested inside Claude, since it's a Claude-only breakdown.
     shares = burn_shares_for_week(weekly_reset)
-    try:
-        goal_lib = _load_goal_lib()
-        goal_cfg = goal_lib.load_goal()
-    except Exception:
-        goal_lib = goal_cfg = None
-
-    if goal_cfg:
-        st = goal_lib.goal_status(goal_cfg, weekly, (pace or {}).get("elapsed_h"), shares)
-        print("---")
-        dl_s = st["deadline"].astimezone().strftime("%b %-d %H:%M")
-        print(f"🎯 Goal: {st['target_pct']:.0f}% by {dl_s} | size=13 {C}")
-        if st["achieved"]:
-            print(f"  ✅ achieved — at {weekly:.0f}% | {OK}")
-        elif st["expired"]:
-            end_s = f"{weekly:.0f}%" if weekly is not None else "?"
-            print(f"  ⏰ expired — ended at {end_s} (target {st['target_pct']:.0f}%) | {WARN}")
-        else:
-            if st["projected_pct"] is not None:
-                word, col = ("on track", OK) if st["on_track"] else ("BEHIND", BAD)
-                print(f"  {word} — projected {st['projected_pct']:.0f}% at deadline | {col}")
-            if st["required_pace"] is not None and st["current_pace"] is not None:
-                print(f"  need {st['required_pace']:.1f}pp/h · burning {st['current_pace']:.1f}pp/h "
-                      f"· {st['hours_to_deadline']:.1f} work-h left | {CD}")
-            elif st["projected_pct"] is None:
-                print(f"  no burn data yet — can't project | {CD}")
-        for fam, ms in st["model_share"].items():
-            if ms["current_pct"] is None:
-                print(f"  {fam} ≥{ms['target_pct']:.0f}% of burn: no local data | {CD}")
-            else:
-                mark, col = ("✓", OK) if ms["met"] else ("✗", BAD)
-                print(f"  {mark} {fam} {ms['current_pct']:.0f}% of burn (target ≥{ms['target_pct']:.0f}%) | {col}")
-
     if model_weekly or shares:
-        print("---")
-        print(f"Model split — this week | size=13 {C}")
+        print(f"--  Model split — this week | size=13")
         fams = sorted(
             set(model_weekly) | set(shares or {}),
             key=lambda f: -(shares or {}).get(f, 0.0),
@@ -816,28 +821,16 @@ def main():
             cap_s = f"{cap:.0f}% of its cap" if cap is not None else "cap —"
             share = (shares or {}).get(fam)
             share_s = f"{share * 100:4.0f}% of burn" if share is not None else "burn —"
-            print(f"  {fam.capitalize():<7} {share_s} · {cap_s} | font=Menlo {CD}")
+            print(f"----  {fam.capitalize():<7} {share_s} · {cap_s} | font=Menlo {NOOP}")
 
-    print("---")
-    print(f"Current 5h session | size=13 {C}")
-    print(f"  {session:.0f}% used · resets in {fmt_reset(session_reset)} | {CD}")
+    print(f"--  Open Claude Web UI | href=https://claude.ai/settings/usage")
 
-    if extra:
-        used = extra.get("used_credits", 0) / 100.0
-        cap = extra.get("monthly_limit", 0) / 100.0
-        epct = extra.get("utilization", 0) or 0
-        enabled = extra.get("is_enabled")
-        cur = extra.get("currency", "USD")
-        print("---")
-        print(f"Extra usage ({'on' if enabled else 'off'}) | size=13 {C}")
-        print(f"  {cur} {used:,.2f} of {cur} {cap:,.0f} ({epct:.1f}%) | {CD}")
-
-    # Codex — weekly + pace + 5h session, mirroring the Claude blocks above
+    # ⬡ Codex Section
     if codex_weekly is not None:
         print("---")
         plan = codex.get("plan_type")
-        print(f"Codex{f' ({plan})' if plan else ''} | size=13 {C}")
-        print(f"  {codex_weekly:.0f}% used · resets in {fmt_reset_epoch(codex_weekly_reset)} | size=13 {C}")
+        print(f"⬡ Codex{f' ({plan})' if plan else ''} | size=13")
+        print(f"--  {codex_weekly:.0f}% used · resets in {fmt_reset_epoch(codex_weekly_reset)} | size=13 {NOOP}")
         if codex_pace_d:
             eh = codex_pace_d["elapsed_h"]
             th = codex_pace_d["total_h"]
@@ -845,14 +838,48 @@ def main():
             exp = codex_pace_d["expected_pct"]
             delta = codex_pace_d["delta_pp"]
             proj = codex_pace_d["projected_pct"]
-            verdict, verdict_color = pace_verdict(proj, OK, WARN, BAD, CD)
-            print(f"  Used {codex_weekly:.0f}% · expected {exp:.0f}% · Δ {delta:+.0f}pp | {C}")
-            print(f"  {verdict} | {verdict_color}")
-            print(f"  Worked {eh:.1f}h · {hours_left:.1f}h left (of {th:.1f}h total, {WORK_START_HOUR}:00–{WORK_END_HOUR}:00 daily) | {CD}")
+            verdict, verdict_color = pace_verdict(proj, OK, WARN, BAD)
+            print(f"--  {verdict}" + (f" | {verdict_color} {NOOP}" if verdict_color else f" | {NOOP}"))
+            print(f"--  expected {exp:.0f}% · Δ {delta:+.0f}pp · Worked {eh:.1f}h · {hours_left:.1f}h left | {NOOP}")
         if codex_session is not None:
-            print(f"  5h session: {codex_session:.0f}% used · resets in {fmt_reset_epoch(codex_session_reset)} | {CD}")
+            print(f"--  5h session: {codex_session:.0f}% used · resets in {fmt_reset_epoch(codex_session_reset)} | {NOOP}")
         if codex.get("from_cache"):
-            print(f"  (showing last Codex snapshot — no recent activity) | {CD}")
+            print(f"--  (showing last Codex snapshot — no recent activity) | {NOOP}")
+        print(f"--  Open Codex Web UI | href=https://chatgpt.com/codex/cloud/settings/analytics#usage")
+
+    # 🌙 Kimi Section
+    if kimi_weekly is not None:
+        print("---")
+        plan = kimi.get("plan_type")
+        print(f"🌙 Kimi{f' ({plan})' if plan else ''} | size=13")
+        print(f"--  {kimi_weekly:.0f}% used · resets in {fmt_reset_epoch(kimi_weekly_reset)} | size=13 {NOOP}")
+        if kimi_pace_d:
+            eh = kimi_pace_d["elapsed_h"]
+            th = kimi_pace_d["total_h"]
+            hours_left = kimi_pace_d["hours_left"]
+            exp = kimi_pace_d["expected_pct"]
+            delta = kimi_pace_d["delta_pp"]
+            proj = kimi_pace_d["projected_pct"]
+            verdict, verdict_color = pace_verdict(proj, OK, WARN, BAD)
+            print(f"--  {verdict}" + (f" | {verdict_color} {NOOP}" if verdict_color else f" | {NOOP}"))
+            print(f"--  expected {exp:.0f}% · Δ {delta:+.0f}pp · Worked {eh:.1f}h · {hours_left:.1f}h left | {NOOP}")
+        if kimi_session is not None:
+            print(f"--  5h session: {kimi_session:.0f}% used · resets in {fmt_reset_epoch(kimi_session_reset)} | {NOOP}")
+        if kimi_extra:
+            cur = kimi_extra.get("currency", "USD")
+            if kimi_extra.get("monthly_limit_enabled") and kimi_extra.get("monthly_limit_cents"):
+                used = kimi_extra.get("monthly_used_cents", 0) / 100.0
+                cap = kimi_extra["monthly_limit_cents"] / 100.0
+                epct = (used / cap * 100) if cap else 0
+                print(f"--  Extra usage (on): {cur} {used:,.2f} of {cur} {cap:,.0f} ({epct:.1f}%) | {NOOP}")
+            else:
+                bal = kimi_extra.get("balance_cents")
+                if bal is None:
+                    bal = kimi_extra.get("total_cents", 0)
+                print(f"--  Extra usage balance: {cur} {bal / 100.0:,.2f} | {NOOP}")
+        if kimi.get("from_cache"):
+            print(f"--  (showing last Kimi snapshot — fetch failed) | {NOOP}")
+        print(f"--  Open Kimi Web UI | href=https://www.kimi.com/membership/subscription?tab=quota")
 
     # Active sessions — context-fill snapshot for /compact warnings
     try:
@@ -867,7 +894,7 @@ def main():
         title = f"Active sessions: {len(sessions)}"
         if warn:
             title += f" · {len(warn)} need /compact"
-        print(f"{title} | size=13 {C}")
+        print(f"{title} | size=13")
         for s in sessions[:6]:
             if s["flag"] == "expensive":
                 emoji, color = "🔴", BAD
@@ -876,26 +903,25 @@ def main():
             elif s["flag"] == "watch":
                 emoji, color = "🟡", WARN
             else:
-                emoji, color = "🟢", CD
+                emoji, color = "🟢", ""
             mins = s["minutes_since_last_turn"]
             mins_s = f"{mins}m ago" if mins is not None else "—"
-            proj = s["project_dir"][1:] if s["project_dir"].startswith("-") else s["project_dir"]
-            proj = proj[:28]
-            print(f"  {emoji} {s['fill_pct']:>5.1f}%  {mins_s:>7}  {proj} | font=Menlo {color}")
+            proj = format_proj_dir(s["project_dir"])
+            attr = f" {color}" if color else ""
+            print(f"--  {emoji} {s['fill_pct']:>5.1f}%  {mins_s:>7}  {proj} | font=Menlo{attr} {NOOP}")
 
+    print("---")
+    print(f"🌐 Open Web UIs | size=13")
+    print("--  Claude (claude.ai) | href=https://claude.ai/settings/usage")
+    print("--  Codex (chatgpt.com) | href=https://chatgpt.com/codex/cloud/settings/analytics#usage")
+    print("--  Kimi (kimi.com) | href=https://www.kimi.com/membership/subscription?tab=quota")
     print("---")
     age = int(time.time() - fetched_at)
     age_s = f"{age}s ago" if age < 60 else f"{age // 60}m ago"
     if estimated:
-        print(f"Weekly is ~estimated from local tokens (Chrome unavailable) | {CD}")
-    print(f"Updated {age_s}{' — STALE' if stale else ''} | {CD}")
-    print("Open claude.ai/settings/usage | href=https://claude.ai/settings/usage")
+        print(f"Weekly is ~estimated from local tokens (Chrome unavailable) | {NOOP}")
+    print(f"Updated {age_s}{' — STALE' if stale else ''} | {NOOP}")
     print("Refresh now | refresh=true")
-    print(f"Set goal… | shell={sys.executable} param1={SCRIPT} "
-          f"param2=--set-goal terminal=false refresh=true")
-    if goal_cfg:
-        print(f"Clear goal | shell={sys.executable} param1={SCRIPT} "
-              f"param2=--clear-goal terminal=false refresh=true")
     print(f"Set pace start time… | shell={sys.executable} param1={SCRIPT} "
           f"param2=--set-start terminal=false refresh=true")
     if ws_override is not None:
@@ -906,3 +932,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

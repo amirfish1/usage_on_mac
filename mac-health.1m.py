@@ -21,11 +21,15 @@ import subprocess
 import time
 import urllib.request
 
-C  = "color=#1a1a1a,#ffffff"
-CD = "color=#666666,#cfcfcf"
 OK = "color=#0a7d20,#5dd66d"
 WARN = "color=#b8860b,#e6c200"
 BAD = "color=#c0392b,#ff7b7b"
+
+# xbar renders any dropdown line with no href=/shell=/refresh= action as a
+# disabled NSMenuItem, which macOS always draws dimmed regardless of a
+# custom color — a harmless no-op shell action is the only way to get
+# purely-informational rows to render at full brightness.
+NOOP = "shell=/usr/bin/true terminal=false"
 
 TOP = "/usr/bin/top"
 PGREP = "/usr/bin/pgrep"
@@ -236,7 +240,7 @@ def memory_pressure(mem, total_mb, kernel_level=None):
     purgeable) — NOT 'unused' from top, which excludes purgeable cache and
     over-reports pressure on macOS."""
     if not mem or not total_mb:
-        return "unknown", "pressure: unknown", CD
+        return "unknown", "pressure: unknown", ""
 
     avail_mb = mem.get("available_mb", mem.get("free_mb", 0))
     avail_pct = avail_mb / total_mb if total_mb else 0
@@ -722,58 +726,58 @@ def main():
     # Load + CPU
     if l1 is not None:
         load_color = OK if norm < 0.7 else (WARN if norm < 1.0 else BAD)
-        print(f"Load: {l1:.2f} / {l5:.2f} / {l15:.2f}  (1m / 5m / 15m) | size=13 {load_color}")
-        print(f"  per core: {norm:.2f}  ·  {cores} cores | font=Menlo {CD}")
+        print(f"Load: {l1:.2f} / {l5:.2f} / {l15:.2f}  (1m / 5m / 15m) | size=13 {load_color} {NOOP}")
+        print(f"  per core: {norm:.2f}  ·  {cores} cores | font=Menlo {NOOP}")
     if s["cpu_idle"] is not None:
         idle_color = OK if s["cpu_idle"] > 50 else (WARN if s["cpu_idle"] > 25 else BAD)
-        print(f"CPU idle: {s['cpu_idle']:.0f}% | size=13 {idle_color}")
+        print(f"CPU idle: {s['cpu_idle']:.0f}% | size=13 {idle_color} {NOOP}")
     print("---")
 
     # CCC (Claude Command Center) health
-    ccc_color = {"ok": OK, "elevated": WARN, "high": BAD, "critical": BAD}.get(ccc_lvl, CD)
-    print(f"CCC {level_emoji(ccc_lvl)} | size=13 {ccc_color}")
+    ccc_color = {"ok": OK, "elevated": WARN, "high": BAD, "critical": BAD}.get(ccc_lvl, "")
+    print(f"CCC {level_emoji(ccc_lvl)} | size=13" + (f" {ccc_color}" if ccc_color else "") + f" {NOOP}")
     if ccc_proc is None:
-        print(f"  server: not running | font=Menlo {BAD}")
+        print(f"  server: not running | font=Menlo {BAD} {NOOP}")
     else:
         cpu_color = OK if ccc_proc["cpu"] < 50 else (WARN if ccc_proc["cpu"] < 100 else BAD)
         print(
             f"  server: {ccc_proc['cpu']:.0f}% CPU · {fmt_mb(ccc_proc['rss_mb'])} · "
-            f"up {fmt_etime(ccc_proc['etime_min'])} · PID {ccc_proc['pid']} | font=Menlo {cpu_color}"
+            f"up {fmt_etime(ccc_proc['etime_min'])} · PID {ccc_proc['pid']} | font=Menlo {cpu_color} {NOOP}"
         )
     if ccc_probe["ok"]:
         ms = ccc_probe["ms"]
         lat_color = OK if ms < 500 else (WARN if ms < 2000 else BAD)
         sess = ccc_probe["sessions"]
         sess_txt = f" · {sess} live session{'' if sess == 1 else 's'}" if sess is not None else ""
-        print(f"  live-activity: {ms:.0f} ms{sess_txt} | font=Menlo {lat_color}")
+        print(f"  live-activity: {ms:.0f} ms{sess_txt} | font=Menlo {lat_color} {NOOP}")
     else:
-        print(f"  live-activity: unreachable ({ccc_probe['error']}) | font=Menlo {BAD}")
+        print(f"  live-activity: unreachable ({ccc_probe['error']}) | font=Menlo {BAD} {NOOP}")
     if ccc_errors is None:
-        print(f"  errors: log not found | font=Menlo {CD}")
+        print(f"  errors: log not found | font=Menlo {NOOP}")
     else:
         err_color = OK if ccc_errors == 0 else (WARN if ccc_errors <= 5 else BAD)
-        print(f"  errors (recent): {ccc_errors} | font=Menlo {err_color}")
+        print(f"  errors (recent): {ccc_errors} | font=Menlo {err_color} {NOOP}")
     print("---")
 
     # Memory
-    print(f"Memory | size=13 {C}")
-    print(f"  {used} used · {avail} available | font=Menlo {CD}")
-    print(f"  {comp} compressed | font=Menlo {CD}")
+    print(f"Memory | size=13 {NOOP}")
+    print(f"  {used} used · {avail} available | font=Menlo {NOOP}")
+    print(f"  {comp} compressed | font=Menlo {NOOP}")
     swap = swap_usage()
     if swap and swap["total"]:
         used_pct = swap["used"] / swap["total"]
         sw_color = OK if used_pct < 0.5 else (WARN if used_pct < 0.85 else BAD)
         print(
             f"  swap: {fmt_mb(swap['used'])} / {fmt_mb(swap['total'])} "
-            f"({used_pct * 100:.0f}%) | font=Menlo {sw_color}"
+            f"({used_pct * 100:.0f}%) | font=Menlo {sw_color} {NOOP}"
         )
-    print(f"  {mem_summary} | font=Menlo {mem_color}")
+    print(f"  {mem_summary} | font=Menlo" + (f" {mem_color}" if mem_color else "") + f" {NOOP}")
     print("---")
 
     # Processes
-    print(f"Processes: {s['procs']} · {s['threads']} threads | size=13 {C}")
-    print(f"  claude CLI: {claude_cli}  ·  claude-index: {claude_index} | font=Menlo {CD}")
-    print(f"  node: {node}  ·  npm: {npm} | font=Menlo {CD}")
+    print(f"Processes: {s['procs']} · {s['threads']} threads | size=13 {NOOP}")
+    print(f"  claude CLI: {claude_cli}  ·  claude-index: {claude_index} | font=Menlo {NOOP}")
+    print(f"  node: {node}  ·  npm: {npm} | font=Menlo {NOOP}")
 
     # Claude sessions — each anchors an MCP subtree; reap stale ones by the
     # whole tree, protect any that's driving an encode/transcode.
@@ -784,8 +788,8 @@ def main():
         reapable = [s for s in sessions if s["reapable"]]
         reap_rss = sum(s["tree_rss"] for s in reapable)
         reap_tag = f" · {len(reapable)} reapable ({fmt_mb(reap_rss)})" if reapable else ""
-        head_color = WARN if reapable else C
-        print(f"Claude sessions: {len(sessions)} · {fmt_mb(total_tree)}{reap_tag} | size=13 {head_color}")
+        head_color = WARN if reapable else ""
+        print(f"Claude sessions: {len(sessions)} · {fmt_mb(total_tree)}{reap_tag} | size=13" + (f" {head_color}" if head_color else "") + f" {NOOP}")
         for s in sessions[:8]:
             when = (f"idle {fmt_etime(s['idle_min'])}" if s["idle_known"]
                     else f"up {fmt_etime(s['age_min'])}")
@@ -795,14 +799,14 @@ def main():
             )
             kill_cmd = "kill -TERM " + " ".join(str(p) for p in s["tree_pids"])
             if s["interactive"]:
-                print(f"  ⌨ {meta} · in use (terminal) | font=Menlo {CD}")
+                print(f"  ⌨ {meta} · in use (terminal) | font=Menlo {NOOP}")
             elif s["busy"]:
                 why = f"working: {s['worker']}" if s["worker"] else f"{s['tree_cpu']:.0f}% CPU"
-                print(f"  ⚙ {meta} · {why} | font=Menlo {OK}")
+                print(f"  ⚙ {meta} · {why} | font=Menlo {OK} {NOOP}")
             elif s["reapable"]:
                 print(f"  🧹 {meta} · kill tree | font=Menlo {WARN} {sh_action(kill_cmd, refresh=True)}")
             else:
-                print(f"  {meta} · idle (recent) · kill tree | font=Menlo {CD} {sh_action(kill_cmd, refresh=True)}")
+                print(f"  {meta} · idle (recent) · kill tree | font=Menlo {sh_action(kill_cmd, refresh=True)}")
         if len(reapable) > 1:
             kill_all = "kill -TERM " + " ".join(
                 str(p) for s in reapable for p in s["tree_pids"]
@@ -818,13 +822,13 @@ def main():
     alarms = [(name, zombie_counts[name]) for name, _pattern in ZOMBIE_PATTERNS if zombie_counts[name] > 0]
     if alarms:
         print("---")
-        print(f"⚠️  Zombies detected | size=13 {BAD}")
+        print(f"⚠️  Zombies detected | size=13 {BAD} {NOOP}")
         for name, n in alarms:
-            print(f"  {name}: {n} running | font=Menlo {BAD}")
+            print(f"  {name}: {n} running | font=Menlo {BAD} {NOOP}")
 
     if hogs:
         print("---")
-        print(f"🔥 CPU hogs ({len(hogs)}) | size=13 {BAD}")
+        print(f"🔥 CPU hogs ({len(hogs)}) | size=13 {BAD} {NOOP}")
         for hog in hogs[:5]:
             line = (
                 f"  {hog['cpu']:.0f}% · PID {hog['pid']} · {hog['label']} "
@@ -834,32 +838,32 @@ def main():
                 kill_cmd = f"kill -TERM {hog['pid']}"
                 line += f" · kill | font=Menlo {BAD} {sh_action(kill_cmd, refresh=True)}"
             else:
-                line += f" | font=Menlo {BAD}"
+                line += f" | font=Menlo {BAD} {NOOP}"
             print(line)
 
     # Memory relief: ranked culprits plus safe, concrete next actions.
     print("---")
-    print(f"Memory relief | size=13 {C}")
+    print(f"Memory relief | size=13 {NOOP}")
     suggestions = cleanup_suggestions(groups, alarms, hogs)
     if suggestions:
         for text, command, color in suggestions:
             if command:
                 print(f"  {text} | font=Menlo {color} {sh_action(command, refresh=True)}")
             else:
-                print(f"  {text} | font=Menlo {color}")
+                print(f"  {text} | font=Menlo {color} {NOOP}")
     else:
-        print(f"  No obvious cleanup target right now | font=Menlo {OK}")
+        print(f"  No obvious cleanup target right now | font=Menlo {OK} {NOOP}")
 
     print("  Open Activity Monitor | "
           "shell=/usr/bin/open param1=-a param2=\"Activity Monitor\" terminal=false")
 
     # Top memory groups (aggregated by app; kill actions live in the
     # suggestions above, so the per-PID list was redundant and was removed).
-    print("  Top memory groups | font=Menlo {0}".format(CD))
+    print(f"  Top memory groups | font=Menlo {NOOP}")
     for group in groups[:5]:
         print(
             f"    {fmt_mb(group['rss_mb'])} · {group['count']} procs · {group['label']} "
-            f"| font=Menlo {CD}"
+            f"| font=Menlo {NOOP}"
         )
 
     print("---")

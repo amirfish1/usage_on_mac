@@ -112,11 +112,10 @@ class ClaudeUsageOutputTest(unittest.TestCase):
         try:
             env = os.environ.copy()
             env["CCC_USAGE_URL"] = f"http://127.0.0.1:{server.server_port}/api/usage/current"
-            # Keep the subprocess hermetic: no real transcripts or goal file.
+            # Keep the subprocess hermetic: no real transcripts.
             with tempfile.TemporaryDirectory() as tmp:
                 env["CLAUDE_PROJECTS_DIR"] = tmp
                 env["CLAUDE_USAGE_MODEL_CACHE"] = os.path.join(tmp, "cache.json")
-                env["CLAUDE_USAGE_GOAL_FILE"] = os.path.join(tmp, "goal.json")
                 env["CODEX_SESSIONS_DIR"] = tmp
                 env["CODEX_USAGE_CACHE"] = os.path.join(tmp, "codex.json")
                 proc = subprocess.run(
@@ -133,8 +132,11 @@ class ClaudeUsageOutputTest(unittest.TestCase):
             server.server_close()
 
         output = proc.stdout
-        self.assertIn("Used 19% · expected 15% · Δ +4pp", output)
+        self.assertIn("19% used · resets in", output)
+        self.assertIn("expected 15% · Δ +4pp", output)
         self.assertIn("Worked 14.0h · 77.0h left", output)
+        # weekly % shouldn't be repeated across the summary and pace-detail rows
+        self.assertNotIn("Used 19%", output)
         self.assertIn("Updated ", output)
         self.assertIn("Refresh now | refresh=true", output)
         self.assertNotIn("via CCC", output)
@@ -178,7 +180,6 @@ class ClaudeUsageOutputTest(unittest.TestCase):
         with (
             mock.patch.object(plugin, "fetch_from_ccc", return_value=ccc),
             mock.patch.object(plugin, "burn_shares_for_week", return_value=None),
-            mock.patch.object(plugin, "_load_goal_lib", side_effect=ImportError),
             mock.patch.dict(sys.modules, {"_codex_lib": fake_codex_module}),
             redirect_stdout(output),
         ):
@@ -189,6 +190,112 @@ class ClaudeUsageOutputTest(unittest.TestCase):
         self.assertIn("  7% used", rendered)
         self.assertNotIn("  2% used", rendered)
 
+    def test_kimi_usage_section_renders(self):
+        plugin = load_plugin()
+        now = datetime.now(timezone.utc)
+        reset = now + timedelta(days=5)
+        ccc = {
+            "ok": True,
+            "fetched_at": now.isoformat(),
+            "claude": {
+                "five_hour": {"pct": 11.0, "resets_at": (now + timedelta(hours=4)).isoformat()},
+                "seven_day": {"pct": 19.0, "resets_at": reset.isoformat()},
+                "pace": {
+                    "ok": True,
+                    "projected_pct": 54.0,
+                    "elapsed_h": 14.0,
+                    "total_h": 91.0,
+                    "hours_left": 77.0,
+                    "expected_pct": 15.4,
+                    "delta_pp": 3.6,
+                },
+            },
+            "codex": {},
+        }
+        local_kimi = {
+            "weekly": {"pct": 15.0, "used": 15, "limit": 100,
+                       "resets_at": int(reset.timestamp())},
+            "session": {"pct": 4.0, "used": 4, "limit": 100,
+                        "resets_at": int((now + timedelta(hours=4)).timestamp())},
+            "extra": {
+                "total_cents": 1000,
+                "balance_cents": None,
+                "monthly_used_cents": 1000,
+                "monthly_limit_cents": 10000,
+                "monthly_limit_enabled": True,
+                "currency": "USD",
+            },
+            "plan_type": "Advanced",
+            "from_cache": False,
+        }
+        fake_kimi_module = SimpleNamespace(read_usage=lambda: local_kimi)
+        fake_codex_module = SimpleNamespace(read_usage=lambda: None)
+        output = StringIO()
+
+        with (
+            mock.patch.object(plugin, "fetch_from_ccc", return_value=ccc),
+            mock.patch.object(plugin, "burn_shares_for_week", return_value=None),
+            mock.patch.dict(sys.modules, {"_codex_lib": fake_codex_module,
+                                          "_kimi_lib": fake_kimi_module}),
+            redirect_stdout(output),
+        ):
+            plugin.main()
+
+        rendered = output.getvalue()
+        self.assertIn("🌙 15%", rendered)
+        self.assertIn("Kimi (Advanced)", rendered)
+        self.assertIn("  15% used", rendered)
+        self.assertIn("5h session: 4% used", rendered)
+        self.assertIn("Extra usage (on): USD 10.00 of USD 100 (10.0%)", rendered)
+
+    def test_web_ui_links_rendered(self):
+        plugin = load_plugin()
+        now = datetime.now(timezone.utc)
+        reset = now + timedelta(days=5)
+        ccc = {
+            "ok": True,
+            "fetched_at": now.isoformat(),
+            "claude": {
+                "five_hour": {"pct": 10.0, "resets_at": (now + timedelta(hours=4)).isoformat()},
+                "seven_day": {"pct": 20.0, "resets_at": reset.isoformat()},
+            },
+            "codex": {},
+        }
+        local_codex = {
+            "weekly": {"pct": 5.0, "resets_at": int(reset.timestamp()), "window_minutes": 10080},
+            "session": None,
+            "plan_type": "prolite",
+            "from_cache": False,
+        }
+        local_kimi = {
+            "weekly": {"pct": 10.0, "used": 10, "limit": 100, "resets_at": int(reset.timestamp())},
+            "session": None,
+            "plan_type": "Advanced",
+            "from_cache": False,
+        }
+        output = StringIO()
+        with (
+            mock.patch.object(plugin, "fetch_from_ccc", return_value=ccc),
+            mock.patch.object(plugin, "burn_shares_for_week", return_value=None),
+            mock.patch.dict(sys.modules, {"_codex_lib": SimpleNamespace(read_usage=lambda: local_codex),
+                                          "_kimi_lib": SimpleNamespace(read_usage=lambda: local_kimi)}),
+            redirect_stdout(output),
+        ):
+            plugin.main()
+
+        rendered = output.getvalue()
+        # Verify direct links inside engine sections and footer section
+        self.assertIn("Open Claude Web UI | href=https://claude.ai/settings/usage", rendered)
+        self.assertIn("Open Codex Web UI | href=https://chatgpt.com/codex/cloud/settings/analytics#usage", rendered)
+        self.assertIn("Open Kimi Web UI | href=https://www.kimi.com/membership/subscription?tab=quota", rendered)
+        self.assertIn("🌐 Open Web UIs", rendered)
+
+    def test_format_proj_dir(self):
+        plugin = load_plugin()
+        formatted = plugin.format_proj_dir("Users-amirfish-Apps-claude-c")
+        self.assertEqual(formatted, "~/Apps-claude-c")
+
 
 if __name__ == "__main__":
     unittest.main()
+

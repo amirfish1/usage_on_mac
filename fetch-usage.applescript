@@ -36,19 +36,47 @@ on run
 		end repeat
 
 		if targetTab is missing value then return "{\"ok\":false,\"error\":\"no claude.ai tab open\"}"
-
-		tell targetTab to execute javascript kickoff
 	end tell
+
+	-- A tab discarded by Memory Saver has no renderer, so execute javascript hangs
+	-- until the AppleEvent times out (-1712). Reload to revive it, then retry once.
+	try
+		with timeout of 5 seconds
+			tell application "Google Chrome Beta" to tell targetTab to execute javascript kickoff
+		end timeout
+	on error
+		tell application "Google Chrome Beta"
+			tell targetTab to reload
+			repeat 20 times
+				delay 0.5
+				if (loading of targetTab) is false then exit repeat
+			end repeat
+		end tell
+		delay 1
+		try
+			with timeout of 5 seconds
+				tell application "Google Chrome Beta" to tell targetTab to execute javascript kickoff
+			end timeout
+		on error
+			return "{\"ok\":false,\"error\":\"execute javascript hung even after tab reload\"}"
+		end try
+	end try
 
 	-- Poll for the response up to 8s
 	set resp to ""
 	repeat 16 times
 		delay 0.5
-		tell application "Google Chrome Beta"
-			tell targetTab
-				set resp to execute javascript "window.__cuOut || ''"
-			end tell
-		end tell
+		try
+			with timeout of 5 seconds
+				tell application "Google Chrome Beta"
+					tell targetTab
+						set resp to execute javascript "window.__cuOut || ''"
+					end tell
+				end tell
+			end timeout
+		on error
+			set resp to ""
+		end try
 		if resp is not "" and resp is not missing value then exit repeat
 	end repeat
 

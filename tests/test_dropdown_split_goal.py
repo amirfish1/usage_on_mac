@@ -20,13 +20,6 @@ def load_plugin():
     return module
 
 
-def load_goal_lib():
-    spec = importlib.util.spec_from_file_location("goal", ROOT / "goal.py")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
 def ccc_payload(now, reset):
     return {
         "ok": True,
@@ -70,21 +63,15 @@ class ScopedWeeklyFromLimitsTest(unittest.TestCase):
 
 
 class DropdownRenderTest(unittest.TestCase):
-    def render(self, goal_cfg=None, shares=None):
+    def render(self, shares=None):
         plugin = load_plugin()
-        goal_lib = load_goal_lib()
         now = datetime.now(timezone.utc)
         reset = now + timedelta(days=3)
-        fake_goal_lib = SimpleNamespace(
-            load_goal=lambda: goal_cfg,
-            goal_status=goal_lib.goal_status,
-        )
         output = StringIO()
         with (
             mock.patch.object(plugin, "fetch_from_ccc",
                               return_value=ccc_payload(now, reset)),
             mock.patch.object(plugin, "burn_shares_for_week", return_value=shares),
-            mock.patch.object(plugin, "_load_goal_lib", return_value=fake_goal_lib),
             mock.patch.dict(sys.modules, {"_codex_lib": SimpleNamespace(read_usage=lambda: None)}),
             redirect_stdout(output),
         ):
@@ -102,36 +89,12 @@ class DropdownRenderTest(unittest.TestCase):
         self.assertLess(out.index("Opus"), out.index("Sonnet"))
         self.assertLess(out.index("Sonnet"), out.index("Fable "))
 
-    def test_goal_section_behind(self):
-        goal_cfg = {
-            "target_pct": 100.0,
-            "deadline": datetime.now().astimezone() + timedelta(hours=2),
-            "model_share": {"fable": 50.0},
-        }
-        out = self.render(goal_cfg=goal_cfg,
-                          shares={"fable": 0.268, "opus": 0.393, "sonnet": 0.339})
-        self.assertIn("🎯 Goal: 100% by", out)
-        # weekly 42% at 2.1pp/h can't reach 100% in <=2 work hours
-        self.assertIn("BEHIND — projected", out)
-        self.assertIn("✗ fable 27% of burn (target ≥50%)", out)
-        self.assertIn("Clear goal", out)
-
-    def test_goal_section_achieved(self):
-        goal_cfg = {
-            "target_pct": 40.0,
-            "deadline": datetime.now().astimezone() + timedelta(hours=2),
-            "model_share": {},
-        }
-        out = self.render(goal_cfg=goal_cfg)
-        self.assertIn("✅ achieved — at 42%", out)
-
-    def test_no_goal_no_section(self):
-        out = self.render(goal_cfg=None, shares=None)
-        self.assertNotIn("🎯 Goal", out)
-        self.assertIn("Set goal…", out)
-        self.assertNotIn("Clear goal", out)
+    def test_model_split_without_shares(self):
+        out = self.render(shares=None)
         # Fable still shown from the API bucket even without local shares
         self.assertIn("Fable   burn — · 44% of its cap", out)
+        self.assertNotIn("Set goal", out)
+        self.assertNotIn("🎯 Goal", out)
 
 
 if __name__ == "__main__":

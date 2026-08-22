@@ -2,7 +2,7 @@
 
 A pair of [xbar](https://xbarapp.com) plugins that sit in your macOS menu bar:
 
-- **`claude-usage.5m.py`** — shows your real Anthropic Pro/Max weekly usage %, 5-hour session %, and a pace indicator (are you on track to stay under limits this week?). Pulls live data straight from the same endpoint that powers [claude.ai/settings/usage](https://claude.ai/settings/usage).
+- **`claude-usage.5m.py`** — shows your real Anthropic Pro/Max weekly usage %, 5-hour session %, and a pace indicator (are you on track to stay under limits this week?). Pulls live data straight from the same endpoint that powers [claude.ai/settings/usage](https://claude.ai/settings/usage). Also shows Codex and Kimi (Kimi Code CLI) usage — weekly %, 5h session %, pace, and extra-usage balance — sourced locally from each CLI's own data (Codex rollout logs; Kimi's OAuth token calling the same `api.kimi.com/coding/v1/usages` endpoint its `/usage` command uses).
 - **`mac-health.1m.py`** — system load, memory pressure, zombie-process watchdog, and cleanup suggestions for heavy or leaked processes.
 
 ![screenshot showing menu bar with weekly % and dropdown with pace details]()
@@ -18,24 +18,41 @@ A pair of [xbar](https://xbarapp.com) plugins that sit in your macOS menu bar:
 
 **Dropdown (claude-usage):**
 ```
-Weekly limit (all models)
+🤖 Claude (Weekly limit all models)
   8% used · resets in 5d 3h
-  Used 8% · expected 11% · Δ -3pp
   on pace — projected 72% by week end
-  Worked 9.5h of 91h (7:00–20:00 daily, 7d)
+  Used 8% · expected 11% · Δ -3pp · Worked 9.5h · 81.5h left
+  5h session: 7% used · resets in 3h 12m
+  Extra usage (on): USD 72.62 of USD 120.00 (60.5%)
+  Open Claude Web UI
 
-Weekly Sonnet only
-  2% used · resets in 5d 3h
+Model split — this week
+  Sonnet     70% of burn · cap —
+  Opus       30% of burn · cap —
 
-Current 5h session
-  7% used · resets in 3h 12m
+⬡ Codex (prolite)
+  7% used · resets in 5d 3h
+  on pace — projected 50% by week end
+  Used 7% · expected 11% · Δ -4pp · Worked 9.5h · 81.5h left
+  5h session: 4% used · resets in 3h 12m
+  Open Codex Web UI
 
-Extra usage (on)
-  USD 72.62 of USD 120.00 (60.5%)
+🌙 Kimi (Advanced)
+  15% used · resets in 6d 9h
+  on pace — projected 60% by week end
+  Used 15% · expected 11% · Δ +4pp · Worked 9.5h · 81.5h left
+  5h session: 4% used · resets in 4h 58m
+  Extra usage (on): USD 10.00 of USD 100 (10.0%)
+  Open Kimi Web UI
 
 Active sessions: 3 · 1 need /compact
-  🟠  68.3%    4m ago  claude-sonnet-4-6   my-project
-  🟢   8.1%   12m ago  claude-opus-4-7     other-project
+  🟠  68.3%    4m ago  ~/my-project
+  🟢   8.1%   12m ago  ~/other-project
+
+🌐 Open Web UIs
+  Claude (claude.ai)
+  Codex (chatgpt.com)
+  Kimi (kimi.ai)
 ```
 
 ---
@@ -61,16 +78,32 @@ git clone https://github.com/amirfish1/usage_on_mac.git ~/dev/usage_on_mac
 brew install --cask xbar
 
 # 3. Drop wrapper scripts into xbar's plugin directory.
-#    The wrappers exec the .py files from the repo and strip the
-#    SwiftBar-style dark/light color and font hints that xbar doesn't parse.
+#    The wrappers exec the .py files from the repo and strip whichever half
+#    (light/dark) of the comma-separated SwiftBar-style color/font hints
+#    doesn't match your current system appearance, since xbar doesn't parse
+#    the dual-value syntax itself.
 mkdir -p "$HOME/Library/Application Support/xbar/plugins"
 cat > "$HOME/Library/Application Support/xbar/plugins/claude-usage.5m.sh" <<'EOF'
 #!/bin/bash
-exec "$HOME/dev/usage_on_mac/claude-usage.5m.py" "$@" | sed -E 's/(color=#[a-fA-F0-9]+),#[a-fA-F0-9]+/\1/g; s/(font=[^,| ]+),[^| ]+/\1/g'
+if defaults read -g AppleInterfaceStyle 2>/dev/null | grep -q Dark; then
+    COLOR_SED='s/color=#[a-fA-F0-9]+,(#[a-fA-F0-9]+)/color=\1/g'
+    FONT_SED='s/font=[^,| ]+,([^| ]+)/font=\1/g'
+else
+    COLOR_SED='s/(color=#[a-fA-F0-9]+),#[a-fA-F0-9]+/\1/g'
+    FONT_SED='s/(font=[^,| ]+),[^| ]+/\1/g'
+fi
+exec "$HOME/dev/usage_on_mac/claude-usage.5m.py" "$@" | sed -E "$COLOR_SED; $FONT_SED"
 EOF
 cat > "$HOME/Library/Application Support/xbar/plugins/mac-health.1m.sh" <<'EOF'
 #!/bin/bash
-exec "$HOME/dev/usage_on_mac/mac-health.1m.py" "$@" | sed -E 's/(color=#[a-fA-F0-9]+),#[a-fA-F0-9]+/\1/g; s/(font=[^,| ]+),[^| ]+/\1/g'
+if defaults read -g AppleInterfaceStyle 2>/dev/null | grep -q Dark; then
+    COLOR_SED='s/color=#[a-fA-F0-9]+,(#[a-fA-F0-9]+)/color=\1/g'
+    FONT_SED='s/font=[^,| ]+,([^| ]+)/font=\1/g'
+else
+    COLOR_SED='s/(color=#[a-fA-F0-9]+),#[a-fA-F0-9]+/\1/g'
+    FONT_SED='s/(font=[^,| ]+),[^| ]+/\1/g'
+fi
+exec "$HOME/dev/usage_on_mac/mac-health.1m.py" "$@" | sed -E "$COLOR_SED; $FONT_SED"
 EOF
 chmod +x "$HOME/Library/Application Support/xbar/plugins/"*.sh
 
@@ -130,6 +163,8 @@ WORK_DAYS_PER_WEEK = 7
 | `claude-usage.5m.py` | Main xbar plugin — usage %, pace, active sessions |
 | `fetch-usage.applescript` | Fetches the usage JSON from an open Chrome/claude.ai tab |
 | `_session_lib.py` | Helper — reads local `~/.claude` transcripts to show context-fill per session |
+| `_codex_lib.py` | Helper — Codex weekly/5h usage from local `~/.codex` rollout logs |
+| `_kimi_lib.py` | Helper — Kimi (Kimi Code CLI) weekly/5h/extra usage via `~/.kimi-code` OAuth token + `api.kimi.com/coding/v1/usages` |
 | `ccc-context-fill.py` | CLI tool — same context-fill data as a table or JSON |
 | `mac-health.1m.py` | xbar plugin — system load, memory, zombie process watchdog, cleanup suggestions |
 

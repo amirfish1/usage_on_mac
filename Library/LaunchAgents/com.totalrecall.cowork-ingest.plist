@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.totalrecall.cowork-ingest</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/amirfish/.claude/total-recall/plugins/total-recall/brain.dist/brain</string>
+        <string>backfill</string>
+        <string>--cowork</string>
+        <string>--quiet</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>StartInterval</key>
+    <integer>1800</integer>
+    <key>WatchPaths</key>
+    <array>
+        <string>Library/Application Support/Claude/claude-code-sessions</string>
+        <string>Library/Application Support/Claude/local-agent-mode-sessions</string>
+    </array>
+    <key>ProcessType</key>
+    <string>Background</string>
+    <key>Nice</key>
+    <integer>19</integer>
+    <key>StandardOutPath</key>
+    <string>~/.total-recall/logs/cowork-ingest.log</string>
+    <key>StandardErrorPath</key>
+    <string>~/.total-recall/logs/cowork-ingest-err.log</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>TOTAL_RECALL_HOME</key>
+        <string>~/.total-recall</string>
+    </dict>
+</dict>
+</plist>

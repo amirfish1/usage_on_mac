@@ -3,3 +3,5 @@ __pycache__/
 .disabled/
 .DS_Store
 .claude/
+.gstack/
+.hunch/
