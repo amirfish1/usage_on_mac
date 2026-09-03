@@ -2,7 +2,7 @@
 
 A pair of [xbar](https://xbarapp.com) plugins that sit in your macOS menu bar:
 
-- **`claude-usage.5m.py`** — shows your real Anthropic Pro/Max weekly usage %, 5-hour session %, and a pace indicator (are you on track to stay under limits this week?). Pulls live data straight from the same endpoint that powers [claude.ai/settings/usage](https://claude.ai/settings/usage). Also shows Codex and Kimi (Kimi Code CLI) usage — weekly %, 5h session %, pace, and extra-usage balance — sourced locally from each CLI's own data (Codex rollout logs; Kimi's OAuth token calling the same `api.kimi.com/coding/v1/usages` endpoint its `/usage` command uses).
+- **`claude-usage.5m.py`** — shows your real Anthropic Pro/Max weekly usage %, 5-hour session %, and a pace indicator (are you on track to stay under limits this week?). Pulls live data straight from the same endpoint that powers [claude.ai/settings/usage](https://claude.ai/settings/usage). Also shows Codex, Kimi (Kimi Code CLI), Google Antigravity (agy CLI), and Grok (xAI Grok CLI) usage — weekly %, 5h session %, pace, and extra-usage balance — sourced locally from each CLI's own data (Codex rollout logs; Kimi's OAuth token calling the same `api.kimi.com/coding/v1/usages` endpoint its `/usage` command uses; Antigravity's JSON output calling `agy --print /usage`; Grok's local credits log at `~/.grok/logs/unified.jsonl`). Features real brand Retina icons for each provider in the dropdown and authentic brand symbols in the menu bar.
 - **`mac-health.1m.py`** — system load, memory pressure, zombie-process watchdog, and cleanup suggestions for heavy or leaked processes.
 
 ![screenshot showing menu bar with weekly % and dropdown with pace details]()
@@ -11,39 +11,64 @@ A pair of [xbar](https://xbarapp.com) plugins that sit in your macOS menu bar:
 
 ## What you see
 
-**Menu bar headline:** `🟢 8% · 72% proj`
+**Menu bar headline:** `[Claude Icon] 29%·34  [Codex Icon] 99%·235  [Kimi Icon] 51%·184  [Gemini Icon] 43%·170  [Gemini Icon] 3P 0%·0  [Grok Icon] 8%·8`
 
-- `8%` = weekly usage consumed so far
-- `72% proj` = projected usage by end of week at your current pace (green / yellow / orange / red)
+- **Hybrid Coloring Scheme:**
+  - **Weekly Usage %** is rendered in each provider's authentic brand color:
+    - Claude: Terracotta (`#EB784B`)
+    - Codex: OpenAI Emerald (`#10B981`)
+    - Kimi: Sky Cyan (`#38BDF8`)
+    - Antigravity / Gemini: Lavender Purple (`#A78BFA`)
+    - Grok: Crisp Silver / Charcoal (`#F3F4F6` / `#1F2937`)
+  - **Projected End-of-Week Pace %** is rendered in health status colors:
+    - 🟢 **Green** (`#34C759`): On pace (projected ≤ 100%)
+    - 🟡 **Yellow** (`#FFD60A`): Warning (projected 100% – 110%)
+    - 🔴 **Red** (`#FF453A`): Burning fast / limit reached (projected > 110% or ≥ 100%)
 
-**Dropdown (claude-usage):**
+**Dropdown (claude-usage with real Retina icons and colored status rows):**
 ```
-🤖 Claude (Weekly limit all models)
-  8% used · resets in 5d 3h
-  on pace — projected 72% by week end
-  Used 8% · expected 11% · Δ -3pp · Worked 9.5h · 81.5h left
-  5h session: 7% used · resets in 3h 12m
-  Extra usage (on): USD 72.62 of USD 120.00 (60.5%)
+Claude (Weekly limit all models)
+  26% used · resets in 1d 6h
+  on pace — projected 31% by week end
+  5h session: 23% used · resets in 52m
+  Extra usage (on): USD 13.35 of USD 120.00 (11.1%)
   Open Claude Web UI
 
 Model split — this week
-  Sonnet     70% of burn · cap —
-  Opus       30% of burn · cap —
+  Sonnet     42% of burn · cap —
+  Haiku      27% of burn · cap —
+  Opus       21% of burn · cap —
+  Fable       9% of burn · 12% of its cap
 
-⬡ Codex (prolite)
-  7% used · resets in 5d 3h
-  on pace — projected 50% by week end
-  Used 7% · expected 11% · Δ -4pp · Worked 9.5h · 81.5h left
+Codex (prolite)
+  99% used · resets in 4d 13h
+  BURNING FAST — projected 250% by week end
   5h session: 4% used · resets in 3h 12m
   Open Codex Web UI
 
-🌙 Kimi (Advanced)
-  15% used · resets in 6d 9h
-  on pace — projected 60% by week end
-  Used 15% · expected 11% · Δ +4pp · Worked 9.5h · 81.5h left
-  5h session: 4% used · resets in 4h 58m
-  Extra usage (on): USD 10.00 of USD 100 (10.0%)
+Kimi (Advanced)
+  51% used · resets in 5d 13h
+  BURNING FAST — projected 201% by week end
+  5h session: 0% used · resets in 2h 45m
+  Extra usage balance: USD 9.47
   Open Kimi Web UI
+
+Antigravity
+  Gemini Models
+    37% used · resets in 5d 16h
+    BURNING FAST — projected 161% by week end
+    5h session: 26% used · resets in 3h 50m
+  Claude/GPT Models
+    0% used · resets in 6d 23h
+    on pace — projected 0% by week end
+    5h session: 0% used · resets in 4h 59m
+  Open Antigravity Home
+
+Grok (SuperGrok)
+  8% used · resets in 16h 15m
+  on pace — projected 21% by week end
+  Extra usage balance: USD 10.00
+  Open Grok Web UI
 
 Active sessions: 3 · 1 need /compact
   🟠  68.3%    4m ago  ~/my-project
@@ -53,6 +78,8 @@ Active sessions: 3 · 1 need /compact
   Claude (claude.ai)
   Codex (chatgpt.com)
   Kimi (kimi.ai)
+  Antigravity (antigravity.google)
+  Grok (grok.com)
 ```
 
 ---
@@ -165,6 +192,10 @@ WORK_DAYS_PER_WEEK = 7
 | `_session_lib.py` | Helper — reads local `~/.claude` transcripts to show context-fill per session |
 | `_codex_lib.py` | Helper — Codex weekly/5h usage from local `~/.codex` rollout logs |
 | `_kimi_lib.py` | Helper — Kimi (Kimi Code CLI) weekly/5h/extra usage via `~/.kimi-code` OAuth token + `api.kimi.com/coding/v1/usages` |
+| `_antigravity_lib.py` | Helper — Antigravity weekly/5h usage via `agy --print /usage --output-format json` |
+| `_grok_lib.py` | Helper — Grok (xAI Grok CLI) weekly usage via local `~/.grok/logs/unified.jsonl` credits config |
+| `_icons_lib.py` | Helper — provides real brand Retina icons (base64 PNG) for Claude, Codex, Kimi, Antigravity, and Grok |
+| `icons/` | Directory containing light/dark and 32x32 Retina PNG brand icons |
 | `ccc-context-fill.py` | CLI tool — same context-fill data as a table or JSON |
 | `mac-health.1m.py` | xbar plugin — system load, memory, zombie process watchdog, cleanup suggestions |
 

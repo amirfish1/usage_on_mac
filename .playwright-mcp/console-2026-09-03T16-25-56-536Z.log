@@ -1,0 +1,153 @@
+[ -128314ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:8765/ccc-plugin.js:0
+[ -126349ms] [VERBOSE] [DOM] Password field is not contained in a form: (More info: https://goo.gl/9p2vKq) %o @ http://127.0.0.1:8090/:0
+[ -126338ms] [VERBOSE] [DOM] Password field is not contained in a form: (More info: https://goo.gl/9p2vKq) %o @ http://127.0.0.1:8090/:0
+[  -81260ms] [ERROR] Failed to load resource: the server responded with a status of 400 (Bad Request) @ http://127.0.0.1:8090/api/sessions:0
+[    -914ms] [INFO] Banner not shown: beforeinstallpromptevent.preventDefault() called. The page must call beforeinstallpromptevent.prompt() to show the banner. @ http://127.0.0.1:8090/:0
+[ -126935ms] [WARNING] [ARCHIVE-DIAG] first sessions loaded -> setArchiveMode @ http://127.0.0.1:8090/static/app.js?v=1788451403:43
+[ -126929ms] [WARNING] [ARCHIVE-DIAG] refreshArchiveData start window=7d staleOk=true @ http://127.0.0.1:8090/static/app.js?v=1788451403:43
+[  -68607ms] [WARNING] [ARCHIVE-DIAG] recoverIfStuck: loader showing, archiveLoaded=false rows=0 retry=0 pause=false conv= hidden=true @ http://127.0.0.1:8090/static/app.js?v=1788451403:43
+[  -68583ms] [WARNING] [ARCHIVE-DIAG] conversations/list ok: 704 rows @ http://127.0.0.1:8090/static/app.js?v=1788451403:43
+[  -67324ms] [WARNING] [ARCHIVE-DIAG] refreshArchiveData merged 704 rows, archiveLoaded=true @ http://127.0.0.1:8090/static/app.js?v=1788451403:43
+[  -53356ms] [INFO] [PERF] archive_load 73645ms @ http://127.0.0.1:8090/static/app.js?v=1788451403:67
+[  -37718ms] [WARNING] [POLLER] cccHealth 89189ms (>= 5000ms interval) @ http://127.0.0.1:8090/static/app.js?v=1788451403:43
+[  -33320ms] [WARNING] [POLLER] archiveProgress 92002ms (>= 250ms interval) @ http://127.0.0.1:8090/static/app.js?v=1788451403:43
+[    -996ms] [WARNING] [ARCHIVE-DIAG] alive hidden=true archiveLoaded=true rows=704 loader=true pause=false conv= @ http://127.0.0.1:8090/static/app.js?v=1788451403:43
+[      19ms] [WARNING] [PERF] BREACH archive_load 73645ms @ http://127.0.0.1:8090/static/app.js?v=1788451403:43
+[    6208ms] [ERROR] Failed to load resource: the server responded with a status of 400 (Bad Request) @ http://127.0.0.1:8090/api/sessions:0
+[   23721ms] [WARNING] [ARCHIVE-DIAG] conversations/list ok: 706 rows @ http://127.0.0.1:8090/static/app.js?v=1788451403:43
+[   53379ms] [WARNING] [ARCHIVE-DIAG] alive hidden=true archiveLoaded=true rows=706 loader=true pause=false conv= @ http://127.0.0.1:8090/static/app.js?v=1788451403:43
+[  215511ms] [WARNING] [ARCHIVE-DIAG] alive hidden=true archiveLoaded=true rows=706 loader=true pause=false conv= @ http://127.0.0.1:8090/static/app.js?v=1788451403:43
+[  278292ms] [WARNING] [ARCHIVE-DIAG] alive hidden=true archiveLoaded=true rows=706 loader=true pause=false conv= @ http://127.0.0.1:8090/static/app.js?v=1788451403:43
+[  296809ms] [WARNING] [ROW-FLICKER] disappeared sid=b078eb43-b32f-41e5-9257-0dc660b6e09a lastSeenAgo=269s stage={"inArchiveData":true,"inArchiveRows":true,"inWindowed":true,"inRowsForRender":true} @ http://127.0.0.1:8090/static/app.js?v=1788451403:43
+[  297836ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:8090/api/status:0
+[  297841ms] [WARNING] [ARCHIVE-DIAG] alive hidden=true archiveLoaded=true rows=706 loader=true pause=false conv= @ http://127.0.0.1:8090/static/app.js?v=1788451403:43
+[  297980ms] [WARNING] [POLLER] cccHealth 298415ms (>= 5000ms interval) @ http://127.0.0.1:8090/static/app.js?v=1788451403:43
+[  353112ms] [WARNING] [ARCHIVE-DIAG] alive hidden=true archiveLoaded=true rows=706 loader=true pause=false conv= @ http://127.0.0.1:8090/static/app.js?v=1788451403:43
+[  367522ms] [WARNING] [POLLER] cccHealth 26623ms (>= 5000ms interval) @ http://127.0.0.1:8090/static/app.js?v=1788451403:43
+[  373582ms] [WARNING] [POLLER] hiStatus 374569ms (>= 4000ms interval) @ http://127.0.0.1:8090/static/app.js?v=1788451403:43
+[  373821ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:8090/openapi.json:0
+[  373935ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:8090/docs:0
+[  373990ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:8090/api:0
+[  460226ms] [WARNING] [ARCHIVE-DIAG] alive hidden=true archiveLoaded=true rows=706 loader=true pause=false conv= @ http://127.0.0.1:8090/static/app.js?v=1788451403:43
+[  471339ms] [WARNING] [POLLER] hiStatus 11103ms (>= 4000ms interval) @ http://127.0.0.1:8090/static/app.js?v=1788451403:43
+[  474717ms] [ERROR] Failed to load resource: the server responded with a status of 403 (Forbidden) @ http://127.0.0.1:8090/api/read-file:0
+[  474733ms] [ERROR] Failed to load resource: the server responded with a status of 403 (Forbidden) @ http://127.0.0.1:8090/api/read-file:0
+[  520164ms] [WARNING] [ARCHIVE-DIAG] alive hidden=true archiveLoaded=true rows=706 loader=true pause=false conv= @ http://127.0.0.1:8090/static/app.js?v=1788451403:43
+[  529575ms] [WARNING] [POLLER] hiStatus 9158ms (>= 4000ms interval) @ http://127.0.0.1:8090/static/app.js?v=1788451403:43
+[  581507ms] [WARNING] [ARCHIVE-DIAG] alive hidden=true archiveLoaded=true rows=706 loader=true pause=false conv= @ http://127.0.0.1:8090/static/app.js?v=1788451403:43
+[  587802ms] [WARNING] [POLLER] cccHealth 7393ms (>= 5000ms interval) @ http://127.0.0.1:8090/static/app.js?v=1788451403:43
+[  600008ms] [WARNING] [POLLER] hiStatus 14651ms (>= 4000ms interval) @ http://127.0.0.1:8090/static/app.js?v=1788451403:43
+[  640178ms] [WARNING] [ARCHIVE-DIAG] alive hidden=true archiveLoaded=true rows=706 loader=true pause=false conv= @ http://127.0.0.1:8090/static/app.js?v=1788451403:43
+[  650746ms] [WARNING] [POLLER] hiStatus 10558ms (>= 4000ms interval) @ http://127.0.0.1:8090/static/app.js?v=1788451403:43
+[  701109ms] [WARNING] [ARCHIVE-DIAG] alive hidden=true archiveLoaded=true rows=706 loader=true pause=false conv= @ http://127.0.0.1:8090/static/app.js?v=1788451403:43
+[  712171ms] [WARNING] [POLLER] hiStatus 10699ms (>= 4000ms interval) @ http://127.0.0.1:8090/static/app.js?v=1788451403:43
+[  760603ms] [WARNING] [ARCHIVE-DIAG] alive hidden=true archiveLoaded=true rows=706 loader=true pause=false conv= @ http://127.0.0.1:8090/static/app.js?v=1788451403:43
+[  769080ms] [WARNING] [POLLER] hiStatus 8438ms (>= 4000ms interval) @ http://127.0.0.1:8090/static/app.js?v=1788451403:43
+[  802474ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:8090/api/read-file:0
+[  820249ms] [WARNING] [ARCHIVE-DIAG] alive hidden=true archiveLoaded=true rows=706 loader=true pause=false conv= @ http://127.0.0.1:8090/static/app.js?v=1788451403:43
+[  846909ms] [WARNING] [POLLER] hiStatus 26580ms (>= 4000ms interval) @ http://127.0.0.1:8090/static/app.js?v=1788451403:43
+[  880187ms] [WARNING] [ARCHIVE-DIAG] alive hidden=true archiveLoaded=true rows=706 loader=true pause=false conv= @ http://127.0.0.1:8090/static/app.js?v=1788451403:43
+[  937930ms] [WARNING] [POLLER] hiStatus 57620ms (>= 4000ms interval) @ http://127.0.0.1:8090/static/app.js?v=1788451403:43
+[  940474ms] [WARNING] [ARCHIVE-DIAG] alive hidden=true archiveLoaded=true rows=706 loader=true pause=false conv= @ http://127.0.0.1:8090/static/app.js?v=1788451403:43
+[  990219ms] [WARNING] [POLLER] hiStatus 49397ms (>= 4000ms interval) @ http://127.0.0.1:8090/static/app.js?v=1788451403:43
+[ 1000567ms] [WARNING] [ARCHIVE-DIAG] alive hidden=true archiveLoaded=true rows=706 loader=true pause=false conv= @ http://127.0.0.1:8090/static/app.js?v=1788451403:43
+[ 1052832ms] [WARNING] [POLLER] hiStatus 51917ms (>= 4000ms interval) @ http://127.0.0.1:8090/static/app.js?v=1788451403:43
+[ 1060538ms] [WARNING] [ARCHIVE-DIAG] alive hidden=true archiveLoaded=true rows=706 loader=true pause=false conv= @ http://127.0.0.1:8090/static/app.js?v=1788451403:43
+[ 1120204ms] [WARNING] [ARCHIVE-DIAG] alive hidden=true archiveLoaded=true rows=706 loader=true pause=false conv= @ http://127.0.0.1:8090/static/app.js?v=1788451403:43
+[ 1150936ms] [WARNING] [POLLER] hiStatus 90118ms (>= 4000ms interval) @ http://127.0.0.1:8090/static/app.js?v=1788451403:43
+[ 1181688ms] [WARNING] [ARCHIVE-DIAG] alive hidden=true archiveLoaded=true rows=706 loader=true pause=false conv= @ http://127.0.0.1:8090/static/app.js?v=1788451403:43
+[ 1188431ms] [WARNING] [POLLER] cccHealth 7496ms (>= 5000ms interval) @ http://127.0.0.1:8090/static/app.js?v=1788451403:43
+[ 1240388ms] [WARNING] [ARCHIVE-DIAG] alive hidden=true archiveLoaded=true rows=706 loader=true pause=false conv= @ http://127.0.0.1:8090/static/app.js?v=1788451403:43
+[ 1300284ms] [WARNING] [ARCHIVE-DIAG] alive hidden=true archiveLoaded=true rows=706 loader=true pause=false conv= @ http://127.0.0.1:8090/static/app.js?v=1788451403:43
+[ 1302269ms] [WARNING] [POLLER] hiStatus 115021ms (>= 4000ms interval) @ http://127.0.0.1:8090/static/app.js?v=1788451403:43
+[ 1360256ms] [WARNING] [ARCHIVE-DIAG] alive hidden=true archiveLoaded=true rows=706 loader=true pause=false conv= @ http://127.0.0.1:8090/static/app.js?v=1788451403:43
+[ 1391102ms] [WARNING] [POLLER] hiStatus 30712ms (>= 4000ms interval) @ http://127.0.0.1:8090/static/app.js?v=1788451403:43
+[ 1420210ms] [WARNING] [ARCHIVE-DIAG] alive hidden=true archiveLoaded=true rows=706 loader=true pause=false conv= @ http://127.0.0.1:8090/static/app.js?v=1788451403:43
+[ 1431462ms] [WARNING] [POLLER] hiStatus 11124ms (>= 4000ms interval) @ http://127.0.0.1:8090/static/app.js?v=1788451403:43
+[ 1480202ms] [WARNING] [ARCHIVE-DIAG] alive hidden=true archiveLoaded=true rows=706 loader=true pause=false conv= @ http://127.0.0.1:8090/static/app.js?v=1788451403:43
+[ 1508482ms] [WARNING] [POLLER] hiStatus 27934ms (>= 4000ms interval) @ http://127.0.0.1:8090/static/app.js?v=1788451403:43
+[ 1541289ms] [WARNING] [ARCHIVE-DIAG] alive hidden=true archiveLoaded=true rows=706 loader=true pause=false conv= @ http://127.0.0.1:8090/static/app.js?v=1788451403:43
+[ 1580584ms] [WARNING] [POLLER] hiStatus 38849ms (>= 4000ms interval) @ http://127.0.0.1:8090/static/app.js?v=1788451403:43
+[ 1600460ms] [WARNING] [ARCHIVE-DIAG] alive hidden=true archiveLoaded=true rows=706 loader=true pause=false conv= @ http://127.0.0.1:8090/static/app.js?v=1788451403:43
+[ 1660367ms] [WARNING] [ARCHIVE-DIAG] alive hidden=true archiveLoaded=true rows=706 loader=true pause=false conv= @ http://127.0.0.1:8090/static/app.js?v=1788451403:43
+[ 1663094ms] [WARNING] [POLLER] hiStatus 59198ms (>= 4000ms interval) @ http://127.0.0.1:8090/static/app.js?v=1788451403:43
+[ 1720263ms] [WARNING] [ARCHIVE-DIAG] alive hidden=true archiveLoaded=true rows=706 loader=true pause=false conv= @ http://127.0.0.1:8090/static/app.js?v=1788451403:43
+[ 1747008ms] [WARNING] [POLLER] hiStatus 25379ms (>= 4000ms interval) @ http://127.0.0.1:8090/static/app.js?v=1788451403:43
+[ 1780509ms] [WARNING] [ARCHIVE-DIAG] alive hidden=true archiveLoaded=true rows=706 loader=true pause=false conv= @ http://127.0.0.1:8090/static/app.js?v=1788451403:43
+[ 1814888ms] [WARNING] [POLLER] hiStatus 33946ms (>= 4000ms interval) @ http://127.0.0.1:8090/static/app.js?v=1788451403:43
+[ 1840336ms] [WARNING] [ARCHIVE-DIAG] alive hidden=true archiveLoaded=true rows=706 loader=true pause=false conv= @ http://127.0.0.1:8090/static/app.js?v=1788451403:43
+[ 1858418ms] [WARNING] [POLLER] hiStatus 18032ms (>= 4000ms interval) @ http://127.0.0.1:8090/static/app.js?v=1788451403:43
+[ 1900293ms] [WARNING] [ARCHIVE-DIAG] alive hidden=true archiveLoaded=true rows=706 loader=true pause=false conv= @ http://127.0.0.1:8090/static/app.js?v=1788451403:43
+[ 1919565ms] [WARNING] [POLLER] hiStatus 19238ms (>= 4000ms interval) @ http://127.0.0.1:8090/static/app.js?v=1788451403:43
+[ 1960251ms] [WARNING] [ARCHIVE-DIAG] alive hidden=true archiveLoaded=true rows=706 loader=true pause=false conv= @ http://127.0.0.1:8090/static/app.js?v=1788451403:43
+[ 1993002ms] [WARNING] [POLLER] hiStatus 32628ms (>= 4000ms interval) @ http://127.0.0.1:8090/static/app.js?v=1788451403:43
+[ 2020245ms] [WARNING] [ARCHIVE-DIAG] alive hidden=true archiveLoaded=true rows=706 loader=true pause=false conv= @ http://127.0.0.1:8090/static/app.js?v=1788451403:43
+[ 2029649ms] [WARNING] [POLLER] hiStatus 9266ms (>= 4000ms interval) @ http://127.0.0.1:8090/static/app.js?v=1788451403:43
+[ 2080821ms] [WARNING] [ARCHIVE-DIAG] alive hidden=true archiveLoaded=true rows=706 loader=true pause=false conv= @ http://127.0.0.1:8090/static/app.js?v=1788451403:43
+[ 2111066ms] [WARNING] [POLLER] hiStatus 30083ms (>= 4000ms interval) @ http://127.0.0.1:8090/static/app.js?v=1788451403:43
+[ 2132399ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:8090/api/queue/events:0
+[ 2143622ms] [WARNING] [ARCHIVE-DIAG] alive hidden=true archiveLoaded=true rows=706 loader=true pause=false conv= @ http://127.0.0.1:8090/static/app.js?v=1788451403:43
+[ 2178243ms] [WARNING] [POLLER] hiStatus 34547ms (>= 4000ms interval) @ http://127.0.0.1:8090/static/app.js?v=1788451403:43
+[ 2200424ms] [WARNING] [ARCHIVE-DIAG] alive hidden=true archiveLoaded=true rows=706 loader=true pause=false conv= @ http://127.0.0.1:8090/static/app.js?v=1788451403:43
+[ 2217119ms] [WARNING] [POLLER] hiStatus 16422ms (>= 4000ms interval) @ http://127.0.0.1:8090/static/app.js?v=1788451403:43
+[ 2260273ms] [WARNING] [ARCHIVE-DIAG] alive hidden=true archiveLoaded=true rows=706 loader=true pause=false conv= @ http://127.0.0.1:8090/static/app.js?v=1788451403:43
+[ 2313697ms] [WARNING] [POLLER] hiStatus 53335ms (>= 4000ms interval) @ http://127.0.0.1:8090/static/app.js?v=1788451403:43
+[ 2320266ms] [WARNING] [ARCHIVE-DIAG] alive hidden=true archiveLoaded=true rows=706 loader=true pause=false conv= @ http://127.0.0.1:8090/static/app.js?v=1788451403:43
+[ 2377925ms] [WARNING] [POLLER] hiStatus 57470ms (>= 4000ms interval) @ http://127.0.0.1:8090/static/app.js?v=1788451403:43
+[ 2380278ms] [WARNING] [ARCHIVE-DIAG] alive hidden=true archiveLoaded=true rows=706 loader=true pause=false conv= @ http://127.0.0.1:8090/static/app.js?v=1788451403:43
+[ 2442365ms] [WARNING] [ARCHIVE-DIAG] alive hidden=true archiveLoaded=true rows=706 loader=true pause=false conv= @ http://127.0.0.1:8090/static/app.js?v=1788451403:43
+[ 2487604ms] [WARNING] [POLLER] hiStatus 107291ms (>= 4000ms interval) @ http://127.0.0.1:8090/static/app.js?v=1788451403:43
+[ 2500933ms] [WARNING] [ARCHIVE-DIAG] alive hidden=true archiveLoaded=true rows=706 loader=true pause=false conv= @ http://127.0.0.1:8090/static/app.js?v=1788451403:43
+[ 2571085ms] [WARNING] [ARCHIVE-DIAG] alive hidden=true archiveLoaded=true rows=706 loader=true pause=false conv= @ http://127.0.0.1:8090/static/app.js?v=1788451403:43
+[ 2575684ms] [WARNING] [POLLER] cccHealth 9324ms (>= 5000ms interval) @ http://127.0.0.1:8090/static/app.js?v=1788451403:43
+[ 2633573ms] [WARNING] [POLLER] hiStatus 132346ms (>= 4000ms interval) @ http://127.0.0.1:8090/static/app.js?v=1788451403:43
+[ 2680520ms] [WARNING] [ARCHIVE-DIAG] alive hidden=true archiveLoaded=true rows=706 loader=true pause=false conv= @ http://127.0.0.1:8090/static/app.js?v=1788451403:43
+[ 2744558ms] [WARNING] [ARCHIVE-DIAG] alive hidden=true archiveLoaded=true rows=706 loader=true pause=false conv= @ http://127.0.0.1:8090/static/app.js?v=1788451403:43
+[ 2753760ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_TIMED_OUT @ http://127.0.0.1:8090/api/client-log:0
+[ 2755349ms] [WARNING] [POLLER] cccHealth 10952ms (>= 5000ms interval) @ http://127.0.0.1:8090/static/app.js?v=1788451403:43
+[ 2786958ms] [WARNING] [POLLER] hiStatus 105803ms (>= 4000ms interval) @ http://127.0.0.1:8090/static/app.js?v=1788451403:43
+[ 2795482ms] [ERROR] Failed to load resource: net::ERR_EMPTY_RESPONSE @ http://127.0.0.1:8090/api/watchtower/service/status:0
+[ 2798321ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:8090/api/queue/events:0
+[ 2800217ms] [WARNING] [ARCHIVE-DIAG] alive hidden=true archiveLoaded=true rows=706 loader=true pause=false conv= @ http://127.0.0.1:8090/static/app.js?v=1788451403:43
+[ 2800323ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:8090/api/health:0
+[ 2800407ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:8090/api/client-log:0
+[ 2800408ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:8090/api/control-plane/status:0
+[ 2800467ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:8090/api/watchtower/service/status:0
+[ 2800470ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:8090/api/history/status:0
+[ 2801293ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:8090/api/queue/events:0
+[ 2806280ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:8090/api/queue/events:0
+[ 2815880ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:8090/api/queue/events:0
+[ 2860207ms] [WARNING] [ARCHIVE-DIAG] alive hidden=true archiveLoaded=true rows=706 loader=true pause=false conv= @ http://127.0.0.1:8090/static/app.js?v=1788451403:43
+[ 2877486ms] [WARNING] [POLLER] hiStatus 17229ms (>= 4000ms interval) @ http://127.0.0.1:8090/static/app.js?v=1788451403:43
+[ 2920186ms] [WARNING] [ARCHIVE-DIAG] alive hidden=true archiveLoaded=true rows=706 loader=true pause=false conv= @ http://127.0.0.1:8090/static/app.js?v=1788451403:43
+[ 2931600ms] [WARNING] [POLLER] hiStatus 11319ms (>= 4000ms interval) @ http://127.0.0.1:8090/static/app.js?v=1788451403:43
+[ 2980230ms] [WARNING] [ARCHIVE-DIAG] alive hidden=true archiveLoaded=true rows=706 loader=true pause=false conv= @ http://127.0.0.1:8090/static/app.js?v=1788451403:43
+[ 3019297ms] [WARNING] [POLLER] hiStatus 39001ms (>= 4000ms interval) @ http://127.0.0.1:8090/static/app.js?v=1788451403:43
+[ 3040349ms] [WARNING] [ARCHIVE-DIAG] alive hidden=true archiveLoaded=true rows=706 loader=true pause=false conv= @ http://127.0.0.1:8090/static/app.js?v=1788451403:43
+[ 3079268ms] [WARNING] [POLLER] hiStatus 38757ms (>= 4000ms interval) @ http://127.0.0.1:8090/static/app.js?v=1788451403:43
+[ 3100212ms] [WARNING] [ARCHIVE-DIAG] alive hidden=true archiveLoaded=true rows=706 loader=true pause=false conv= @ http://127.0.0.1:8090/static/app.js?v=1788451403:43
+[ 3116548ms] [WARNING] [POLLER] hiStatus 16259ms (>= 4000ms interval) @ http://127.0.0.1:8090/static/app.js?v=1788451403:43
+[ 3160144ms] [WARNING] [ARCHIVE-DIAG] alive hidden=true archiveLoaded=true rows=706 loader=true pause=false conv= @ http://127.0.0.1:8090/static/app.js?v=1788451403:43
+[ 3199893ms] [WARNING] [POLLER] hiStatus 39731ms (>= 4000ms interval) @ http://127.0.0.1:8090/static/app.js?v=1788451403:43
+[ 3220162ms] [WARNING] [ARCHIVE-DIAG] alive hidden=true archiveLoaded=true rows=706 loader=true pause=false conv= @ http://127.0.0.1:8090/static/app.js?v=1788451403:43
+[ 3243463ms] [WARNING] [POLLER] hiStatus 23292ms (>= 4000ms interval) @ http://127.0.0.1:8090/static/app.js?v=1788451403:43
+[ 3280162ms] [WARNING] [ARCHIVE-DIAG] alive hidden=true archiveLoaded=true rows=706 loader=true pause=false conv= @ http://127.0.0.1:8090/static/app.js?v=1788451403:43
+[ 3285378ms] [WARNING] [POLLER] hiStatus 5200ms (>= 4000ms interval) @ http://127.0.0.1:8090/static/app.js?v=1788451403:43
+[ 3340183ms] [WARNING] [ARCHIVE-DIAG] alive hidden=true archiveLoaded=true rows=706 loader=true pause=false conv= @ http://127.0.0.1:8090/static/app.js?v=1788451403:43
+[ 3349049ms] [WARNING] [POLLER] hiStatus 7339ms (>= 4000ms interval) @ http://127.0.0.1:8090/static/app.js?v=1788451403:43
+[ 3400160ms] [WARNING] [ARCHIVE-DIAG] alive hidden=true archiveLoaded=true rows=706 loader=true pause=false conv= @ http://127.0.0.1:8090/static/app.js?v=1788451403:43
+[ 3460146ms] [WARNING] [ARCHIVE-DIAG] alive hidden=true archiveLoaded=true rows=706 loader=true pause=false conv= @ http://127.0.0.1:8090/static/app.js?v=1788451403:43
+[ 3520153ms] [WARNING] [ARCHIVE-DIAG] alive hidden=true archiveLoaded=true rows=706 loader=true pause=false conv= @ http://127.0.0.1:8090/static/app.js?v=1788451403:43
+[ 3580156ms] [WARNING] [ARCHIVE-DIAG] alive hidden=true archiveLoaded=true rows=706 loader=true pause=false conv= @ http://127.0.0.1:8090/static/app.js?v=1788451403:43
+[ 3640148ms] [WARNING] [ARCHIVE-DIAG] alive hidden=true archiveLoaded=true rows=706 loader=true pause=false conv= @ http://127.0.0.1:8090/static/app.js?v=1788451403:43
+[ 3643669ms] [ERROR] Failed to load resource: the server responded with a status of 403 (Forbidden) @ http://127.0.0.1:8090/api/read-file:0
+[ 3643673ms] [ERROR] Failed to load resource: the server responded with a status of 403 (Forbidden) @ http://127.0.0.1:8090/api/read-file:0
+[ 3643678ms] [ERROR] Failed to load resource: the server responded with a status of 403 (Forbidden) @ http://127.0.0.1:8090/api/read-file:0
+[ 3643682ms] [ERROR] Failed to load resource: the server responded with a status of 403 (Forbidden) @ http://127.0.0.1:8090/api/read-file:0
+[ 3664960ms] [ERROR] Failed to load resource: the server responded with a status of 403 (Forbidden) @ http://127.0.0.1:8090/api/read-file:0
+[ 3664966ms] [ERROR] Failed to load resource: the server responded with a status of 403 (Forbidden) @ http://127.0.0.1:8090/api/read-file:0
+[ 3700158ms] [WARNING] [ARCHIVE-DIAG] alive hidden=true archiveLoaded=true rows=706 loader=true pause=false conv= @ http://127.0.0.1:8090/static/app.js?v=1788451403:43
+[ 3751148ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:8090/api/read-file:0
+[ 3760146ms] [WARNING] [ARCHIVE-DIAG] alive hidden=true archiveLoaded=true rows=706 loader=true pause=false conv= @ http://127.0.0.1:8090/static/app.js?v=1788451403:43
+[ 3815491ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:8090/api/read-file:0
+[ 3820146ms] [WARNING] [ARCHIVE-DIAG] alive hidden=true archiveLoaded=true rows=706 loader=true pause=false conv= @ http://127.0.0.1:8090/static/app.js?v=1788451403:43

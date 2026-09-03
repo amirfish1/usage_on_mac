@@ -295,6 +295,65 @@ class ClaudeUsageOutputTest(unittest.TestCase):
         formatted = plugin.format_proj_dir("Users-amirfish-Apps-claude-c")
         self.assertEqual(formatted, "~/Apps-claude-c")
 
+    def test_antigravity_and_grok_sections_render(self):
+        plugin = load_plugin()
+        now = datetime.now(timezone.utc)
+        reset = now + timedelta(days=5)
+        ccc = {
+            "ok": True,
+            "fetched_at": now.isoformat(),
+            "claude": {
+                "five_hour": {"pct": 10.0, "resets_at": (now + timedelta(hours=4)).isoformat()},
+                "seven_day": {"pct": 20.0, "resets_at": reset.isoformat()},
+            },
+            "codex": {},
+        }
+        local_antigravity = {
+            "gemini": {
+                "weekly": {"pct": 33.0, "resets_at": reset.isoformat()},
+                "session": {"pct": 12.0, "resets_at": (now + timedelta(hours=4)).isoformat()},
+            },
+            "third_party": {
+                "weekly": {"pct": 5.0, "resets_at": reset.isoformat()},
+                "session": {"pct": 0.0, "resets_at": (now + timedelta(hours=4)).isoformat()},
+            },
+            "from_cache": False,
+        }
+        local_grok = {
+            "weekly": {"pct": 8.0, "resets_at": reset.isoformat()},
+            "session": None,
+            "extra": {"balance_cents": 1000},
+            "plan_type": "SuperGrok",
+            "from_cache": False,
+        }
+        output = StringIO()
+        with (
+            mock.patch.object(plugin, "fetch_from_ccc", return_value=ccc),
+            mock.patch.object(plugin, "burn_shares_for_week", return_value=None),
+            mock.patch.dict(sys.modules, {
+                "_antigravity_lib": SimpleNamespace(read_usage=lambda: local_antigravity),
+                "_grok_lib": SimpleNamespace(read_usage=lambda: local_grok),
+            }),
+            redirect_stdout(output),
+        ):
+            plugin.main()
+
+        rendered = output.getvalue()
+        # Headline symbols
+        self.assertIn("✦ 33%", rendered)
+        self.assertIn("✦3P 5%", rendered)
+        self.assertIn("𝕏 8%", rendered)
+        # Dropdown sections
+        self.assertIn("Antigravity", rendered)
+        self.assertIn("Gemini Models", rendered)
+        self.assertIn("Claude/GPT Models", rendered)
+        self.assertIn("Grok (SuperGrok)", rendered)
+        self.assertIn("8% used", rendered)
+        self.assertIn("Open Antigravity Home", rendered)
+        self.assertIn("Open Grok Web UI", rendered)
+        # Real icon images attached to headers
+        self.assertIn("image=", rendered)
+
 
 if __name__ == "__main__":
     unittest.main()

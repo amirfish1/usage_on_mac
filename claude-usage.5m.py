@@ -45,6 +45,20 @@ PROJECTS_DIR = Path.home() / ".claude" / "projects"
 STALE_AFTER = 600  # seconds — show a "stale" marker if older than this
 CCC_USAGE_URL = os.environ.get("CCC_USAGE_URL", "http://127.0.0.1:8090/api/usage/current")
 
+try:
+    sys.path.insert(0, str(SCRIPT.parent))
+    from _icons_lib import (
+        get_dropdown_icon_base64,
+        render_menubar_image,
+        is_dark_mode,
+        HAS_PIL,
+    )
+    HAS_ICONS = HAS_PIL
+except Exception:
+    HAS_ICONS = False
+    get_dropdown_icon_base64 = lambda name, theme=None: ""
+    render_menubar_image = lambda segments, prefix="", suffix="", theme=None: None
+
 # xbar renders any dropdown line with no href=/shell=/refresh= action as a
 # disabled NSMenuItem, which macOS always draws dimmed regardless of a
 # custom color — a harmless no-op shell action is the only way to get
@@ -233,22 +247,27 @@ def days_until(resets_at):
         return None
 
 
-def bar_segment(icon, pct, pace, resets_at=None):
-    """One menu-bar provider segment: 'icon weekly%·proj%' (proj omitted if N/A).
+def bar_segment_text(pct, pace, resets_at=None):
+    """One menu-bar provider segment value: 'weekly%·proj%' (proj omitted if N/A).
 
     Once a limit is hit (pct >= 100), a projection is meaningless — swap it
     for days left until the limit resets instead.
     """
     if pct is None:
-        return f"{icon} —"
+        return "—"
     if pct >= 100:
         d = days_until(resets_at)
         if d is not None:
-            return f"{icon} {pct:.0f}%·{d}d"
-        return f"{icon} {pct:.0f}%"
+            return f"{pct:.0f}%·{d}d"
+        return f"{pct:.0f}%"
     if pace and pace["projected_pct"] is not None:
-        return f"{icon} {pct:.0f}%·{pace['projected_pct']:.0f}"
-    return f"{icon} {pct:.0f}%"
+        return f"{pct:.0f}%·{pace['projected_pct']:.0f}"
+    return f"{pct:.0f}%"
+
+
+def bar_segment(icon, pct, pace, resets_at=None):
+    """One menu-bar provider segment: 'icon weekly%·proj%' (proj omitted if N/A)."""
+    return f"{icon} {bar_segment_text(pct, pace, resets_at)}"
 
 
 def status_for(pct):
@@ -740,28 +759,188 @@ def main():
         kimi_session_reset = ks.get("resets_at")
         kimi_extra = kimi.get("extra")
 
+    # Antigravity CLI usage via its local JSON/CLI.
+    local_antigravity = None
+    try:
+        sys.path.insert(0, str(SCRIPT.parent))
+        from _antigravity_lib import read_usage as antigravity_read_usage
+        local_antigravity = antigravity_read_usage()
+    except Exception:
+        local_antigravity = None
+    agy_gemini_weekly = agy_gemini_weekly_reset = agy_gemini_pace = None
+    agy_gemini_session = agy_gemini_session_reset = None
+    agy_3p_weekly = agy_3p_weekly_reset = agy_3p_pace = None
+    agy_3p_session = agy_3p_session_reset = None
+    if local_antigravity:
+        ag_gem = local_antigravity.get("gemini") or {}
+        if ag_gem:
+            ag_gw = ag_gem.get("weekly") or {}
+            agy_gemini_weekly = ag_gw.get("pct")
+            agy_gemini_weekly_reset = ag_gw.get("resets_at")
+            agy_gemini_pace = codex_pace(agy_gemini_weekly, agy_gemini_weekly_reset, 10080)
+            ag_gs = ag_gem.get("session") or {}
+            agy_gemini_session = ag_gs.get("pct")
+            agy_gemini_session_reset = ag_gs.get("resets_at")
+        ag_3p = local_antigravity.get("third_party") or {}
+        if ag_3p:
+            ag_3pw = ag_3p.get("weekly") or {}
+            agy_3p_weekly = ag_3pw.get("pct")
+            agy_3p_weekly_reset = ag_3pw.get("resets_at")
+            agy_3p_pace = codex_pace(agy_3p_weekly, agy_3p_weekly_reset, 10080)
+            ag_3ps = ag_3p.get("session") or {}
+            agy_3p_session = ag_3ps.get("pct")
+            agy_3p_session_reset = ag_3ps.get("resets_at")
+
+    # Grok (xAI) usage via local CLI logs.
+    local_grok = None
+    try:
+        sys.path.insert(0, str(SCRIPT.parent))
+        from _grok_lib import read_usage as grok_read_usage
+        local_grok = grok_read_usage()
+    except Exception:
+        local_grok = None
+    grok_weekly = grok_weekly_reset = grok_pace_d = None
+    grok_extra = None
+    if local_grok:
+        gw = local_grok.get("weekly") or {}
+        grok_weekly = gw.get("pct")
+        grok_weekly_reset = gw.get("resets_at")
+        grok_pace_d = codex_pace(
+            grok_weekly,
+            grok_weekly_reset,
+            gw.get("window_minutes") or 10080,
+        )
+        grok_extra = local_grok.get("extra")
+
     # Was the live fetch broken on this run?
     fetch_failed = (fresh is None)
     no_tab = bool(err and "no claude.ai tab" in (err or "").lower())
+    cache_age = time.time() - fetched_at
 
-    # Menu bar headline: icon-tagged weekly%·projection per provider
-    # (🤖 Claude, ⬡ Codex). Health colors live in the dropdown.
-    bar = bar_segment("🤖", weekly, pace, weekly_reset)
+    # Build provider segments with real brand symbols and hybrid numbers
+    segments = []
+    c_weekly_text = f"{weekly:.0f}%" if weekly is not None else "—"
     if estimated:
-        bar += "~est"
+        c_weekly_text += "~est"
+    c_pace_text = (
+        f"{days_until(weekly_reset)}d" if (weekly is not None and weekly >= 100 and days_until(weekly_reset) is not None)
+        else (f"{pace['projected_pct']:.0f}" if (pace and pace["projected_pct"] is not None) else None)
+    )
+    segments.append({
+        "icon": "claude",
+        "symbol": "✳",
+        "name": "Claude",
+        "weekly_text": c_weekly_text,
+        "pace_text": c_pace_text,
+        "weekly_pct": weekly,
+        "pace_pct": pace.get("projected_pct") if pace else None,
+        "text": bar_segment_text(weekly, pace, weekly_reset) + ("~est" if estimated else ""),
+    })
+
     if codex_weekly is not None:
-        bar += " " + bar_segment("⬡", codex_weekly, codex_pace_d, codex_weekly_reset)
+        cx_pace_text = (
+            f"{days_until(codex_weekly_reset)}d" if (codex_weekly >= 100 and days_until(codex_weekly_reset) is not None)
+            else (f"{codex_pace_d['projected_pct']:.0f}" if (codex_pace_d and codex_pace_d["projected_pct"] is not None) else None)
+        )
+        segments.append({
+            "icon": "codex",
+            "symbol": "⬡",
+            "name": "Codex",
+            "weekly_text": f"{codex_weekly:.0f}%",
+            "pace_text": cx_pace_text,
+            "weekly_pct": codex_weekly,
+            "pace_pct": codex_pace_d.get("projected_pct") if codex_pace_d else None,
+            "text": bar_segment_text(codex_weekly, codex_pace_d, codex_weekly_reset),
+        })
     if kimi_weekly is not None:
-        bar += " " + bar_segment("🌙", kimi_weekly, kimi_pace_d, kimi_weekly_reset)
+        k_pace_text = (
+            f"{days_until(kimi_weekly_reset)}d" if (kimi_weekly >= 100 and days_until(kimi_weekly_reset) is not None)
+            else (f"{kimi_pace_d['projected_pct']:.0f}" if (kimi_pace_d and kimi_pace_d["projected_pct"] is not None) else None)
+        )
+        segments.append({
+            "icon": "kimi",
+            "symbol": "🌙",
+            "name": "Kimi",
+            "weekly_text": f"{kimi_weekly:.0f}%",
+            "pace_text": k_pace_text,
+            "weekly_pct": kimi_weekly,
+            "pace_pct": kimi_pace_d.get("projected_pct") if kimi_pace_d else None,
+            "text": bar_segment_text(kimi_weekly, kimi_pace_d, kimi_weekly_reset),
+        })
+    if agy_gemini_weekly is not None:
+        ag_pace_text = (
+            f"{days_until(agy_gemini_weekly_reset)}d" if (agy_gemini_weekly >= 100 and days_until(agy_gemini_weekly_reset) is not None)
+            else (f"{agy_gemini_pace['projected_pct']:.0f}" if (agy_gemini_pace and agy_gemini_pace["projected_pct"] is not None) else None)
+        )
+        segments.append({
+            "icon": "gemini",
+            "symbol": "✦",
+            "name": "Antigravity",
+            "weekly_text": f"{agy_gemini_weekly:.0f}%",
+            "pace_text": ag_pace_text,
+            "weekly_pct": agy_gemini_weekly,
+            "pace_pct": agy_gemini_pace.get("projected_pct") if agy_gemini_pace else None,
+            "text": bar_segment_text(agy_gemini_weekly, agy_gemini_pace, agy_gemini_weekly_reset),
+        })
+    if agy_3p_weekly is not None:
+        ag3p_pace_text = (
+            f"{days_until(agy_3p_weekly_reset)}d" if (agy_3p_weekly >= 100 and days_until(agy_3p_weekly_reset) is not None)
+            else (f"{agy_3p_pace['projected_pct']:.0f}" if (agy_3p_pace and agy_3p_pace["projected_pct"] is not None) else None)
+        )
+        segments.append({
+            "icon": "gemini",
+            "symbol": "✦3P",
+            "name": "3P",
+            "label": "3P",
+            "weekly_text": f"{agy_3p_weekly:.0f}%",
+            "pace_text": ag3p_pace_text,
+            "weekly_pct": agy_3p_weekly,
+            "pace_pct": agy_3p_pace.get("projected_pct") if agy_3p_pace else None,
+            "text": bar_segment_text(agy_3p_weekly, agy_3p_pace, agy_3p_weekly_reset),
+        })
+    if grok_weekly is not None:
+        gr_pace_text = (
+            f"{days_until(grok_weekly_reset)}d" if (grok_weekly >= 100 and days_until(grok_weekly_reset) is not None)
+            else (f"{grok_pace_d['projected_pct']:.0f}" if (grok_pace_d and grok_pace_d["projected_pct"] is not None) else None)
+        )
+        segments.append({
+            "icon": "grok",
+            "symbol": "𝕏",
+            "name": "Grok",
+            "weekly_text": f"{grok_weekly:.0f}%",
+            "pace_text": gr_pace_text,
+            "weekly_pct": grok_weekly,
+            "pace_pct": grok_pace_d.get("projected_pct") if grok_pace_d else None,
+            "text": bar_segment_text(grok_weekly, grok_pace_d, grok_weekly_reset),
+        })
+
+    # Menu bar headline: text with authentic brand symbols (used in CLI / tests)
+    bar_parts = [f"{s.get('symbol') or s.get('label') or s['name']} {s['text']}" for s in segments]
+    bar = " ".join(bar_parts)
     if stale:
         bar += " (stale)"
-    # Stale > 1 hour or fetch failure → louder warning prefix (Claude live fetch)
-    cache_age = time.time() - fetched_at
     if fetch_failed and cache_age > 3600:
         bar = "⚠️ " + bar
     elif fetch_failed:
         bar = "⚠ " + bar
-    print(f"{bar} | size=12")
+
+    # Under xbar: render sharp Retina image with real brand icons and hybrid-colored numbers
+    img_b64 = None
+    is_test_run = bool(
+        os.environ.get("PYTEST_CURRENT_TEST")
+        or "pytest" in sys.modules
+        or "unittest" in sys.modules
+        or os.environ.get("NO_MENUBAR_IMAGE")
+    )
+    if HAS_ICONS and not sys.stdout.isatty() and not is_test_run:
+        prefix = "⚠️ " if (fetch_failed and cache_age > 3600) else ("⚠ " if fetch_failed else "")
+        suffix = " (stale)" if stale else ""
+        img_b64 = render_menubar_image(segments, prefix=prefix, suffix=suffix)
+
+    if img_b64:
+        print(f" | image={img_b64}")
+    else:
+        print(f"{bar} | size=12")
     print("---")
 
     # If live fetch is broken, surface the cause + a one-click fix at the top of the dropdown
@@ -780,9 +959,18 @@ def main():
     WARN = "color=#b8860b,#e6c200"
     BAD = "color=#c0392b,#ff7b7b"
 
-    # 🤖 Claude Section
-    print(f"🤖 Claude (Weekly limit all models) | size=13")
-    print(f"--  {weekly:.0f}% used · resets in {fmt_reset(weekly_reset)} | size=13 {NOOP}")
+    # Base64 dropdown icon attributes (real 32x32 Retina PNGs)
+    icon_claude = f"image={get_dropdown_icon_base64('claude')} " if HAS_ICONS else ""
+    icon_codex = f"image={get_dropdown_icon_base64('codex')} " if HAS_ICONS else ""
+    icon_kimi = f"image={get_dropdown_icon_base64('kimi')} " if HAS_ICONS else ""
+    icon_antigravity = f"image={get_dropdown_icon_base64('antigravity')} " if HAS_ICONS else ""
+    icon_gemini = f"image={get_dropdown_icon_base64('gemini')} " if HAS_ICONS else ""
+    icon_grok = f"image={get_dropdown_icon_base64('grok')} " if HAS_ICONS else ""
+
+    # Claude Section
+    c_status_color = BAD if (weekly is not None and weekly >= 100) else (pace_verdict(pace["projected_pct"], OK, WARN, BAD)[1] if pace else "")
+    print(f"Claude (Weekly limit all models) | {icon_claude}size=13")
+    print(f"--  {weekly:.0f}% used · resets in {fmt_reset(weekly_reset)}" + (f" | size=13 {c_status_color} {NOOP}" if c_status_color else f" | size=13 {NOOP}"))
     if ws_override is not None:
         print(f"--  ↻ pace start manually set to {ws_override.strftime('%b %-d %H:%M')} | {NOOP}")
 
@@ -825,12 +1013,13 @@ def main():
 
     print(f"--  Open Claude Web UI | href=https://claude.ai/settings/usage")
 
-    # ⬡ Codex Section
+    # Codex Section
     if codex_weekly is not None:
         print("---")
         plan = codex.get("plan_type")
-        print(f"⬡ Codex{f' ({plan})' if plan else ''} | size=13")
-        print(f"--  {codex_weekly:.0f}% used · resets in {fmt_reset_epoch(codex_weekly_reset)} | size=13 {NOOP}")
+        cx_status_color = BAD if (codex_weekly is not None and codex_weekly >= 100) else (pace_verdict(codex_pace_d["projected_pct"], OK, WARN, BAD)[1] if codex_pace_d else "")
+        print(f"Codex{f' ({plan})' if plan else ''} | {icon_codex}size=13")
+        print(f"--  {codex_weekly:.0f}% used · resets in {fmt_reset_epoch(codex_weekly_reset)}" + (f" | size=13 {cx_status_color} {NOOP}" if cx_status_color else f" | size=13 {NOOP}"))
         if codex_pace_d:
             eh = codex_pace_d["elapsed_h"]
             th = codex_pace_d["total_h"]
@@ -847,12 +1036,13 @@ def main():
             print(f"--  (showing last Codex snapshot — no recent activity) | {NOOP}")
         print(f"--  Open Codex Web UI | href=https://chatgpt.com/codex/cloud/settings/analytics#usage")
 
-    # 🌙 Kimi Section
+    # Kimi Section
     if kimi_weekly is not None:
         print("---")
         plan = kimi.get("plan_type")
-        print(f"🌙 Kimi{f' ({plan})' if plan else ''} | size=13")
-        print(f"--  {kimi_weekly:.0f}% used · resets in {fmt_reset_epoch(kimi_weekly_reset)} | size=13 {NOOP}")
+        k_status_color = BAD if (kimi_weekly is not None and kimi_weekly >= 100) else (pace_verdict(kimi_pace_d["projected_pct"], OK, WARN, BAD)[1] if kimi_pace_d else "")
+        print(f"Kimi{f' ({plan})' if plan else ''} | {icon_kimi}size=13")
+        print(f"--  {kimi_weekly:.0f}% used · resets in {fmt_reset_epoch(kimi_weekly_reset)}" + (f" | size=13 {k_status_color} {NOOP}" if k_status_color else f" | size=13 {NOOP}"))
         if kimi_pace_d:
             eh = kimi_pace_d["elapsed_h"]
             th = kimi_pace_d["total_h"]
@@ -880,6 +1070,73 @@ def main():
         if kimi.get("from_cache"):
             print(f"--  (showing last Kimi snapshot — fetch failed) | {NOOP}")
         print(f"--  Open Kimi Web UI | href=https://www.kimi.com/membership/subscription?tab=quota")
+
+    # Antigravity Section
+    if agy_gemini_weekly is not None or agy_3p_weekly is not None:
+        print("---")
+        print(f"Antigravity | {icon_antigravity}size=13")
+        if agy_gemini_weekly is not None:
+            ag_status_color = BAD if (agy_gemini_weekly is not None and agy_gemini_weekly >= 100) else (pace_verdict(agy_gemini_pace["projected_pct"], OK, WARN, BAD)[1] if agy_gemini_pace else "")
+            print(f"--  Gemini Models | size=12 {NOOP}")
+            print(f"----  {agy_gemini_weekly:.0f}% used · resets in {fmt_reset(agy_gemini_weekly_reset)}" + (f" | size=12 {ag_status_color} {NOOP}" if ag_status_color else f" | size=12 {NOOP}"))
+            if agy_gemini_pace:
+                eh = agy_gemini_pace["elapsed_h"]
+                th = agy_gemini_pace["total_h"]
+                hours_left = agy_gemini_pace["hours_left"]
+                exp = agy_gemini_pace["expected_pct"]
+                delta = agy_gemini_pace["delta_pp"]
+                proj = agy_gemini_pace["projected_pct"]
+                verdict, verdict_color = pace_verdict(proj, OK, WARN, BAD)
+                print(f"----  {verdict}" + (f" | {verdict_color} {NOOP}" if verdict_color else f" | {NOOP}"))
+                print(f"----  expected {exp:.0f}% · Δ {delta:+.0f}pp · Worked {eh:.1f}h · {hours_left:.1f}h left | {NOOP}")
+            if agy_gemini_session is not None:
+                print(f"----  5h session: {agy_gemini_session:.0f}% used · resets in {fmt_reset(agy_gemini_session_reset)} | {NOOP}")
+        if agy_3p_weekly is not None:
+            ag3p_status_color = BAD if (agy_3p_weekly is not None and agy_3p_weekly >= 100) else (pace_verdict(agy_3p_pace["projected_pct"], OK, WARN, BAD)[1] if agy_3p_pace else "")
+            if agy_gemini_weekly is not None:
+                print(f"--  | {NOOP}")
+            print(f"--  Claude/GPT Models | size=12 {NOOP}")
+            print(f"----  {agy_3p_weekly:.0f}% used · resets in {fmt_reset(agy_3p_weekly_reset)}" + (f" | size=12 {ag3p_status_color} {NOOP}" if ag3p_status_color else f" | size=12 {NOOP}"))
+            if agy_3p_pace:
+                eh = agy_3p_pace["elapsed_h"]
+                th = agy_3p_pace["total_h"]
+                hours_left = agy_3p_pace["hours_left"]
+                exp = agy_3p_pace["expected_pct"]
+                delta = agy_3p_pace["delta_pp"]
+                proj = agy_3p_pace["projected_pct"]
+                verdict, verdict_color = pace_verdict(proj, OK, WARN, BAD)
+                print(f"----  {verdict}" + (f" | {verdict_color} {NOOP}" if verdict_color else f" | {NOOP}"))
+                print(f"----  expected {exp:.0f}% · Δ {delta:+.0f}pp · Worked {eh:.1f}h · {hours_left:.1f}h left | {NOOP}")
+            if agy_3p_session is not None:
+                print(f"----  5h session: {agy_3p_session:.0f}% used · resets in {fmt_reset(agy_3p_session_reset)} | {NOOP}")
+        if local_antigravity and local_antigravity.get("from_cache"):
+            print(f"--  (showing last Antigravity snapshot — fetch failed) | {NOOP}")
+        print(f"--  Open Antigravity Home | href=https://antigravity.google/docs")
+
+    # Grok Section
+    if grok_weekly is not None:
+        print("---")
+        plan = local_grok.get("plan_type")
+        gr_status_color = BAD if (grok_weekly is not None and grok_weekly >= 100) else (pace_verdict(grok_pace_d["projected_pct"], OK, WARN, BAD)[1] if grok_pace_d else "")
+        print(f"Grok{f' ({plan})' if plan else ''} | {icon_grok}size=13")
+        print(f"--  {grok_weekly:.0f}% used · resets in {fmt_reset(grok_weekly_reset)}" + (f" | size=13 {gr_status_color} {NOOP}" if gr_status_color else f" | size=13 {NOOP}"))
+        if grok_pace_d:
+            eh = grok_pace_d["elapsed_h"]
+            th = grok_pace_d["total_h"]
+            hours_left = grok_pace_d["hours_left"]
+            exp = grok_pace_d["expected_pct"]
+            delta = grok_pace_d["delta_pp"]
+            proj = grok_pace_d["projected_pct"]
+            verdict, verdict_color = pace_verdict(proj, OK, WARN, BAD)
+            print(f"--  {verdict}" + (f" | {verdict_color} {NOOP}" if verdict_color else f" | {NOOP}"))
+            print(f"--  expected {exp:.0f}% · Δ {delta:+.0f}pp · Worked {eh:.1f}h · {hours_left:.1f}h left | {NOOP}")
+        if grok_extra:
+            bal = grok_extra.get("prepaid_balance_cents", 0)
+            if bal:
+                print(f"--  Extra usage balance: USD {bal / 100.0:,.2f} | {NOOP}")
+        if local_grok.get("from_cache"):
+            print(f"--  (showing last Grok snapshot — from cache) | {NOOP}")
+        print(f"--  Open Grok Web UI | href=https://grok.com")
 
     # Active sessions — context-fill snapshot for /compact warnings
     try:
@@ -912,9 +1169,12 @@ def main():
 
     print("---")
     print(f"🌐 Open Web UIs | size=13")
-    print("--  Claude (claude.ai) | href=https://claude.ai/settings/usage")
-    print("--  Codex (chatgpt.com) | href=https://chatgpt.com/codex/cloud/settings/analytics#usage")
-    print("--  Kimi (kimi.com) | href=https://www.kimi.com/membership/subscription?tab=quota")
+    print(f"--  Claude (claude.ai) | {icon_claude}href=https://claude.ai/settings/usage")
+    print(f"--  Codex (chatgpt.com) | {icon_codex}href=https://chatgpt.com/codex/cloud/settings/analytics#usage")
+    print(f"--  Kimi (kimi.com) | {icon_kimi}href=https://www.kimi.com/membership/subscription?tab=quota")
+    print(f"--  Antigravity (antigravity.google) | {icon_antigravity}href=https://antigravity.google/docs")
+    if grok_weekly is not None or os.path.exists(os.path.expanduser("~/.grok")):
+        print(f"--  Grok (grok.com) | {icon_grok}href=https://grok.com")
     print("---")
     age = int(time.time() - fetched_at)
     age_s = f"{age}s ago" if age < 60 else f"{age // 60}m ago"
