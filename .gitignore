@@ -5,3 +5,8 @@ __pycache__/
 .claude/
 .gstack/
 .hunch/
+~/
+.playwright-mcp/
+__pycache__/
+.pytest_cache/
+*.pyc

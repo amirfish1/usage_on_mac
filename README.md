@@ -5,79 +5,90 @@ A pair of [xbar](https://xbarapp.com) plugins that sit in your macOS menu bar:
 - **`claude-usage.5m.py`** — shows your real Anthropic Pro/Max weekly usage %, 5-hour session %, and a pace indicator (are you on track to stay under limits this week?). Pulls live data straight from the same endpoint that powers [claude.ai/settings/usage](https://claude.ai/settings/usage). Also shows Codex, Kimi (Kimi Code CLI), Google Antigravity (agy CLI), and Grok (xAI Grok CLI) usage — weekly %, 5h session %, pace, and extra-usage balance — sourced locally from each CLI's own data (Codex rollout logs; Kimi's OAuth token calling the same `api.kimi.com/coding/v1/usages` endpoint its `/usage` command uses; Antigravity's JSON output calling `agy --print /usage`; Grok's local credits log at `~/.grok/logs/unified.jsonl`). Features real brand Retina icons for each provider in the dropdown and authentic brand symbols in the menu bar.
 - **`mac-health.1m.py`** — system load, memory pressure, zombie-process watchdog, and cleanup suggestions for heavy or leaked processes.
 
-![screenshot showing menu bar with weekly % and dropdown with pace details]()
+![screenshot showing menu bar with weekly % and dropdown with pace details](docs/screenshot.png)
 
 ---
 
 ## What you see
 
-**Menu bar headline:** `[Claude Icon] 29%·34  [Codex Icon] 99%·235  [Kimi Icon] 51%·184  [Gemini Icon] 43%·170  [Gemini Icon] 3P 0%·0  [Grok Icon] 8%·8`
+**Menu bar headline:** `✳ 62%·69 ⬡ 99%·209 🌙 71%·215 ✦ 52%·170 ✦3P 0%·0 𝕏 8%·8`
+
+(xbar draws this as a Retina image with real brand icons; the line above is the text fallback, captured from a live `./claude-usage.5m.py` run.)
 
 - **Hybrid Coloring Scheme:**
-  - **Weekly Usage %** is rendered in each provider's authentic brand color:
-    - Claude: Terracotta (`#EB784B`)
-    - Codex: OpenAI Emerald (`#10B981`)
-    - Kimi: Sky Cyan (`#38BDF8`)
-    - Antigravity / Gemini: Lavender Purple (`#A78BFA`)
-    - Grok: Crisp Silver / Charcoal (`#F3F4F6` / `#1F2937`)
-  - **Projected End-of-Week Pace %** is rendered in health status colors:
-    - 🟢 **Green** (`#34C759`): On pace (projected ≤ 100%)
-    - 🟡 **Yellow** (`#FFD60A`): Warning (projected 100% – 110%)
-    - 🔴 **Red** (`#FF453A`): Burning fast / limit reached (projected > 110% or ≥ 100%)
+  - **Weekly Usage %** is rendered in each provider's authentic brand color (dark / light):
+    - Claude: apricot (`#FEB95F`) / terracotta (`#C4411E`)
+    - Codex: mint emerald (`#34D399`) / forest emerald (`#058C5F`)
+    - Kimi: ice cyan (`#7DD3FC`) / deep sky (`#0278BE`)
+    - Antigravity / Gemini: lavender lilac (`#DCB9FF`) / deep purple (`#732DDC`)
+    - Grok: white (`#FFFFFF`) / charcoal (`#191E28`)
+  - **Projected End-of-Week Pace %** is rendered in health status colors (dark / light):
+    - 🟢 **Green** (`#4ADE80` / `#16A34A`): On pace (projected ≤ 100%)
+    - 🟡 **Yellow** (`#FDE047` / `#CA8A04`): Warning (projected 100% – 110%)
+    - 🔴 **Red** (`#E11D48` / `#DC2626`): Burning fast / limit reached (projected > 110% or ≥ 100%)
 
 **Dropdown (claude-usage with real Retina icons and colored status rows):**
 ```
 Claude (Weekly limit all models)
-  26% used · resets in 1d 6h
-  on pace — projected 31% by week end
-  5h session: 23% used · resets in 52m
-  Extra usage (on): USD 13.35 of USD 120.00 (11.1%)
+  62% used · resets in 12h 52m
+  on pace — projected 69% by week end
+  expected 90% · Δ -28pp · Worked 82.1h · 8.9h left
+  5h session: 100% used · resets in 2h 52m
+  Extra usage (off): USD 32.06 of USD 120 (26.7%)
+  Model split — this week
+    Sonnet    51% of burn · cap —
+    Opus      26% of burn · cap —
+    Fable     14% of burn · 56% of its cap
+    Haiku      9% of burn · cap —
   Open Claude Web UI
 
-Model split — this week
-  Sonnet     42% of burn · cap —
-  Haiku      27% of burn · cap —
-  Opus       21% of burn · cap —
-  Fable       9% of burn · 12% of its cap
-
 Codex (prolite)
-  99% used · resets in 4d 13h
-  BURNING FAST — projected 250% by week end
-  5h session: 4% used · resets in 3h 12m
+  99% used · resets in 3d 19h
+  BURNING FAST — projected 209% by week end
+  expected 47% · Δ +52pp · Worked 43.1h · 47.9h left
+  (showing last Codex snapshot — no recent activity)
   Open Codex Web UI
 
 Kimi (Advanced)
-  51% used · resets in 5d 13h
-  BURNING FAST — projected 201% by week end
-  5h session: 0% used · resets in 2h 45m
+  71% used · resets in 4d 19h
+  BURNING FAST — projected 215% by week end
+  expected 33% · Δ +38pp · Worked 30.1h · 60.9h left
+  5h session: 0% used · resets in 4h 45m
   Extra usage balance: USD 9.47
   Open Kimi Web UI
 
 Antigravity
   Gemini Models
-    37% used · resets in 5d 16h
-    BURNING FAST — projected 161% by week end
-    5h session: 26% used · resets in 3h 50m
+    52% used · resets in 4d 22h
+    BURNING FAST — projected 170% by week end
+    expected 30% · Δ +21pp · Worked 27.7h · 63.3h left
+    5h session: 13% used · resets in 3h 14m
   Claude/GPT Models
     0% used · resets in 6d 23h
     on pace — projected 0% by week end
+    expected 0% · Δ -0pp · Worked 0.0h · 91.0h left
     5h session: 0% used · resets in 4h 59m
   Open Antigravity Home
 
 Grok (SuperGrok)
-  8% used · resets in 16h 15m
-  on pace — projected 21% by week end
+  8% used · resets in due now
+  on pace — projected 8% by week end
+  expected 102% · Δ -94pp · Worked 92.8h · 0.0h left
   Extra usage balance: USD 10.00
   Open Grok Web UI
 
-Active sessions: 3 · 1 need /compact
-  🟠  68.3%    4m ago  ~/my-project
-  🟢   8.1%   12m ago  ~/other-project
+Active sessions: 23 · 7 need /compact
+  🔴  99.5%  65m ago  ~/Apps-BYM
+  🔴  94.2%  152m ago  ~/Apps-BYM
+  🔴  92.5%  51m ago  ~/Apps-BYM
+  🔴  89.7%  58m ago  ~/Apps-BYM
+  🔴  87.7%  153m ago  ~/Apps-BYM
+  🟠  73.4%  50m ago  ~/Apps-BYM
 
 🌐 Open Web UIs
   Claude (claude.ai)
   Codex (chatgpt.com)
-  Kimi (kimi.ai)
+  Kimi (kimi.com)
   Antigravity (antigravity.google)
   Grok (grok.com)
 ```
@@ -98,51 +109,15 @@ Active sessions: 3 · 1 need /compact
 ## Install
 
 ```bash
-# 1. Clone
-git clone https://github.com/amirfish1/usage_on_mac.git ~/dev/usage_on_mac
-
-# 2. Install xbar (if you haven't)
-brew install --cask xbar
-
-# 3. Drop wrapper scripts into xbar's plugin directory.
-#    The wrappers exec the .py files from the repo and strip whichever half
-#    (light/dark) of the comma-separated SwiftBar-style color/font hints
-#    doesn't match your current system appearance, since xbar doesn't parse
-#    the dual-value syntax itself.
-mkdir -p "$HOME/Library/Application Support/xbar/plugins"
-cat > "$HOME/Library/Application Support/xbar/plugins/claude-usage.5m.sh" <<'EOF'
-#!/bin/bash
-if defaults read -g AppleInterfaceStyle 2>/dev/null | grep -q Dark; then
-    COLOR_SED='s/color=#[a-fA-F0-9]+,(#[a-fA-F0-9]+)/color=\1/g'
-    FONT_SED='s/font=[^,| ]+,([^| ]+)/font=\1/g'
-else
-    COLOR_SED='s/(color=#[a-fA-F0-9]+),#[a-fA-F0-9]+/\1/g'
-    FONT_SED='s/(font=[^,| ]+),[^| ]+/\1/g'
-fi
-exec "$HOME/dev/usage_on_mac/claude-usage.5m.py" "$@" | sed -E "$COLOR_SED; $FONT_SED"
-EOF
-cat > "$HOME/Library/Application Support/xbar/plugins/mac-health.1m.sh" <<'EOF'
-#!/bin/bash
-if defaults read -g AppleInterfaceStyle 2>/dev/null | grep -q Dark; then
-    COLOR_SED='s/color=#[a-fA-F0-9]+,(#[a-fA-F0-9]+)/color=\1/g'
-    FONT_SED='s/font=[^,| ]+,([^| ]+)/font=\1/g'
-else
-    COLOR_SED='s/(color=#[a-fA-F0-9]+),#[a-fA-F0-9]+/\1/g'
-    FONT_SED='s/(font=[^,| ]+),[^| ]+/\1/g'
-fi
-exec "$HOME/dev/usage_on_mac/mac-health.1m.py" "$@" | sed -E "$COLOR_SED; $FONT_SED"
-EOF
-chmod +x "$HOME/Library/Application Support/xbar/plugins/"*.sh
-
-# 4. Enable JavaScript from Apple Events in Chrome Beta
-#    Chrome Beta → View → Developer → Allow JavaScript from Apple Events ✓
-#    (one-time, survives restarts)
-
-# 5. Open xbar
+git clone https://github.com/amirfish1/usage_on_mac.git
+cd usage_on_mac
+./install.sh
 open -a xbar
 ```
 
 xbar will immediately show the plugins in your menu bar. `claude-usage` refreshes every 5 minutes; `mac-health` every 1 minute.
+
+**One-time browser setup:** open a logged-in `claude.ai` tab in Chrome Beta and enable **View → Developer → Allow JavaScript from Apple Events** (survives restarts).
 
 To launch xbar automatically at login: **System Settings → General → Login Items → +** and add `/Applications/xbar.app`.
 
@@ -187,6 +162,7 @@ WORK_DAYS_PER_WEEK = 7
 
 | File | Purpose |
 |---|---|
+| `install.sh` | One-command install: writes xbar wrappers and chmods the plugins |
 | `claude-usage.5m.py` | Main xbar plugin — usage %, pace, active sessions |
 | `fetch-usage.applescript` | Fetches the usage JSON from an open Chrome/claude.ai tab |
 | `_session_lib.py` | Helper — reads local `~/.claude` transcripts to show context-fill per session |
