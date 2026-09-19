@@ -1,6 +1,7 @@
 import json
 import importlib.util
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -434,6 +435,23 @@ class ClaudeUsageOutputTest(unittest.TestCase):
         # Toggle menu is rendered, Grok unchecked
         self.assertIn("Menu bar providers", rendered)
         self.assertIn("--toggle-bar param3=grok", rendered)
+        # xbar rejects unknown params (checked= is SwiftBar-only) and shows
+        # "⚠️ <filename>" for the whole plugin — keep output xbar-safe.
+        # Keys are parsed like xbar's parseParamStr: key=value where the
+        # value runs to whitespace/pipe, or to the matching quote if quoted.
+        xbar_params = {
+            "disabled", "key", "href", "color", "font", "size", "shell",
+            "bash", "templateImage", "image", "terminal", "refresh",
+            "dropdown", "length", "trim", "alternate", "emojize", "ansi",
+        }
+        for line in rendered.splitlines():
+            if "|" not in line:
+                continue
+            for key in re.findall(
+                    r"(?:^|[ |])([A-Za-z0-9_]+)=(?:\S|\"|')",
+                    line.split("|", 1)[1]):
+                if not re.fullmatch(r"param\d+", key):
+                    self.assertIn(key, xbar_params, f"line: {line[:80]}")
 
     def test_cli_toggle_bar_roundtrip(self):
         plugin = load_plugin()

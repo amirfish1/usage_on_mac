@@ -1319,9 +1319,9 @@ def main():
     print(f"Updated {age_s}{' — STALE' if stale else ''} | {NOOP}")
     print(f"Menu bar providers | size=13")
     for pid, label in BAR_PROVIDERS:
-        checked = "checked=true " if pid not in bar_hidden else ""
-        print(f"--  {label} | shell={sys.executable} param1={SCRIPT} "
-              f"param2=--toggle-bar param3={pid} terminal=false refresh=true {checked}")
+        mark = "☑" if pid not in bar_hidden else "☐"
+        print(f"--  {mark} {label} | shell={sys.executable} param1={SCRIPT} "
+              f"param2=--toggle-bar param3={pid} terminal=false refresh=true")
     if all_hidden:
         print(f"--  (all hidden — bar shows ⋯ so this menu stays reachable) | {NOOP}")
     print("Refresh now | refresh=true")
