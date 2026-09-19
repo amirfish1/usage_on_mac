@@ -41,6 +41,19 @@ TOKEN_CACHE = Path.home() / ".cache" / "claude-usage-tokens.json"
 # Manual override for the pace "week start" (see get_week_start). Set/cleared
 # from the menu bar; auto-expires when the weekly reset rolls to a new date.
 WEEKSTART_FILE = Path.home() / ".cache" / "claude-usage-weekstart.json"
+# Which providers are hidden from the menu bar headline (dropdown always shows
+# everything). Toggled from the "Menu bar providers" submenu; persisted here.
+BAR_HIDDEN_FILE = Path.home() / ".cache" / "claude-usage-bar-hidden.json"
+# Ordered provider keys for the show/hide submenu. "antigravity" covers both
+# Antigravity segments (Gemini + 3P).
+BAR_PROVIDERS = [
+    ("claude", "Claude"),
+    ("codex", "Codex"),
+    ("kimi", "Kimi"),
+    ("antigravity", "Antigravity"),
+    ("grok", "Grok"),
+    ("devin", "Devin"),
+]
 PROJECTS_DIR = Path.home() / ".claude" / "projects"
 STALE_AFTER = 600  # seconds — show a "stale" marker if older than this
 CCC_USAGE_URL = os.environ.get("CCC_USAGE_URL", "http://127.0.0.1:8090/api/usage/current")
@@ -595,6 +608,35 @@ def cli_clear_start():
         pass
 
 
+def load_bar_hidden():
+    """Set of provider keys currently hidden from the menu bar headline."""
+    try:
+        data = json.loads(BAR_HIDDEN_FILE.read_text())
+        hidden = data.get("hidden")
+        if isinstance(hidden, list):
+            return {p for p in hidden if isinstance(p, str)}
+    except Exception:
+        pass
+    return set()
+
+
+def cli_toggle_bar(provider):
+    """Toggle a provider's menu-bar visibility and persist the choice."""
+    known = {p for p, _ in BAR_PROVIDERS}
+    if provider not in known:
+        return
+    hidden = load_bar_hidden()
+    if provider in hidden:
+        hidden.discard(provider)
+    else:
+        hidden.add(provider)
+    try:
+        BAR_HIDDEN_FILE.parent.mkdir(parents=True, exist_ok=True)
+        BAR_HIDDEN_FILE.write_text(json.dumps({"hidden": sorted(hidden)}))
+    except Exception:
+        pass
+
+
 def format_proj_dir(proj_dir: str, max_len: int = 28) -> str:
     """Format project directory names cleanly for menu dropdown."""
     if not proj_dir:
@@ -620,6 +662,9 @@ def main():
             return
         if sys.argv[1] == "--clear-start":
             cli_clear_start()
+            return
+        if sys.argv[1] == "--toggle-bar" and len(sys.argv) > 2:
+            cli_toggle_bar(sys.argv[2])
             return
 
     ccc_usage = fetch_from_ccc()
@@ -812,6 +857,31 @@ def main():
         )
         grok_extra = local_grok.get("extra")
 
+    # Devin (Cognition) usage via Devin Desktop's session token + GetUserStatus.
+    local_devin = None
+    try:
+        sys.path.insert(0, str(SCRIPT.parent))
+        from _devin_lib import read_usage as devin_read_usage
+        local_devin = devin_read_usage()
+    except Exception:
+        local_devin = None
+    devin_weekly = devin_weekly_reset = devin_pace_d = None
+    devin_daily = devin_daily_reset = None
+    devin_extra = None
+    if local_devin:
+        dw = local_devin.get("weekly") or {}
+        devin_weekly = dw.get("pct")
+        devin_weekly_reset = dw.get("resets_at")
+        devin_pace_d = codex_pace(
+            devin_weekly,
+            devin_weekly_reset,
+            dw.get("window_minutes") or 10080,
+        )
+        ds = local_devin.get("session") or {}
+        devin_daily = ds.get("pct")
+        devin_daily_reset = ds.get("resets_at")
+        devin_extra = local_devin.get("extra")
+
     # Was the live fetch broken on this run?
     fetch_failed = (fresh is None)
     no_tab = bool(err and "no claude.ai tab" in (err or "").lower())
@@ -830,6 +900,7 @@ def main():
         "icon": "claude",
         "symbol": "✳",
         "name": "Claude",
+        "provider": "claude",
         "weekly_text": c_weekly_text,
         "pace_text": c_pace_text,
         "weekly_pct": weekly,
@@ -846,6 +917,7 @@ def main():
             "icon": "codex",
             "symbol": "⬡",
             "name": "Codex",
+            "provider": "codex",
             "weekly_text": f"{codex_weekly:.0f}%",
             "pace_text": cx_pace_text,
             "weekly_pct": codex_weekly,
@@ -861,6 +933,7 @@ def main():
             "icon": "kimi",
             "symbol": "🌙",
             "name": "Kimi",
+            "provider": "kimi",
             "weekly_text": f"{kimi_weekly:.0f}%",
             "pace_text": k_pace_text,
             "weekly_pct": kimi_weekly,
@@ -876,6 +949,7 @@ def main():
             "icon": "gemini",
             "symbol": "✦",
             "name": "Antigravity",
+            "provider": "antigravity",
             "weekly_text": f"{agy_gemini_weekly:.0f}%",
             "pace_text": ag_pace_text,
             "weekly_pct": agy_gemini_weekly,
@@ -892,6 +966,7 @@ def main():
             "symbol": "✦3P",
             "name": "3P",
             "label": "3P",
+            "provider": "antigravity",
             "weekly_text": f"{agy_3p_weekly:.0f}%",
             "pace_text": ag3p_pace_text,
             "weekly_pct": agy_3p_weekly,
@@ -907,16 +982,43 @@ def main():
             "icon": "grok",
             "symbol": "𝕏",
             "name": "Grok",
+            "provider": "grok",
             "weekly_text": f"{grok_weekly:.0f}%",
             "pace_text": gr_pace_text,
             "weekly_pct": grok_weekly,
             "pace_pct": grok_pace_d.get("projected_pct") if grok_pace_d else None,
             "text": bar_segment_text(grok_weekly, grok_pace_d, grok_weekly_reset),
         })
+    if devin_weekly is not None:
+        d_pace_text = (
+            f"{days_until(devin_weekly_reset)}d" if (devin_weekly >= 100 and days_until(devin_weekly_reset) is not None)
+            else (f"{devin_pace_d['projected_pct']:.0f}" if (devin_pace_d and devin_pace_d["projected_pct"] is not None) else None)
+        )
+        segments.append({
+            "icon": "devin",
+            "symbol": "⬢",
+            "name": "Devin",
+            "provider": "devin",
+            "weekly_text": f"{devin_weekly:.0f}%",
+            "pace_text": d_pace_text,
+            "weekly_pct": devin_weekly,
+            "pace_pct": devin_pace_d.get("projected_pct") if devin_pace_d else None,
+            "text": bar_segment_text(devin_weekly, devin_pace_d, devin_weekly_reset),
+        })
+
+    # Hide providers the user toggled off in "Menu bar providers". Keep at
+    # least a minimal placeholder when everything is hidden so the dropdown
+    # (and the toggle menu inside it) stays reachable.
+    bar_hidden = load_bar_hidden()
+    visible_segments = [s for s in segments if s.get("provider") not in bar_hidden]
+    all_hidden = bool(segments) and not visible_segments
+    segments = visible_segments
 
     # Menu bar headline: text with authentic brand symbols (used in CLI / tests)
     bar_parts = [f"{s.get('symbol') or s.get('label') or s['name']} {s['text']}" for s in segments]
     bar = " ".join(bar_parts)
+    if all_hidden:
+        bar = "⋯"
     if stale:
         bar += " (stale)"
     if fetch_failed and cache_age > 3600:
@@ -966,6 +1068,7 @@ def main():
     icon_antigravity = f"image={get_dropdown_icon_base64('antigravity')} " if HAS_ICONS else ""
     icon_gemini = f"image={get_dropdown_icon_base64('gemini')} " if HAS_ICONS else ""
     icon_grok = f"image={get_dropdown_icon_base64('grok')} " if HAS_ICONS else ""
+    icon_devin = f"image={get_dropdown_icon_base64('devin')} " if HAS_ICONS else ""
 
     # Claude Section
     c_status_color = BAD if (weekly is not None and weekly >= 100) else (pace_verdict(pace["projected_pct"], OK, WARN, BAD)[1] if pace else "")
@@ -1138,6 +1241,37 @@ def main():
             print(f"--  (showing last Grok snapshot — from cache) | {NOOP}")
         print(f"--  Open Grok Web UI | href=https://grok.com")
 
+    # Devin Section
+    if devin_weekly is not None:
+        print("---")
+        plan = local_devin.get("plan_type")
+        d_status_color = BAD if (devin_weekly is not None and devin_weekly >= 100) else (pace_verdict(devin_pace_d["projected_pct"], OK, WARN, BAD)[1] if devin_pace_d else "")
+        print(f"Devin{f' ({plan})' if plan else ''} | {icon_devin}size=13")
+        print(f"--  {devin_weekly:.0f}% used · resets in {fmt_reset_epoch(devin_weekly_reset)}" + (f" | size=13 {d_status_color} {NOOP}" if d_status_color else f" | size=13 {NOOP}"))
+        if devin_pace_d:
+            eh = devin_pace_d["elapsed_h"]
+            th = devin_pace_d["total_h"]
+            hours_left = devin_pace_d["hours_left"]
+            exp = devin_pace_d["expected_pct"]
+            delta = devin_pace_d["delta_pp"]
+            proj = devin_pace_d["projected_pct"]
+            verdict, verdict_color = pace_verdict(proj, OK, WARN, BAD)
+            print(f"--  {verdict}" + (f" | {verdict_color} {NOOP}" if verdict_color else f" | {NOOP}"))
+            print(f"--  expected {exp:.0f}% · Δ {delta:+.0f}pp · Worked {eh:.1f}h · {hours_left:.1f}h left | {NOOP}")
+        if devin_daily is not None:
+            print(f"--  Daily quota: {devin_daily:.0f}% used · resets in {fmt_reset_epoch(devin_daily_reset)} | {NOOP}")
+        if devin_extra:
+            micros = devin_extra.get("overage_balance_micros")
+            try:
+                overage = float(micros) / 1e6
+            except (TypeError, ValueError):
+                overage = 0.0
+            if overage:
+                print(f"--  Overage balance: USD {overage:,.2f} | {NOOP}")
+        if local_devin.get("from_cache"):
+            print(f"--  (showing last Devin snapshot — fetch failed) | {NOOP}")
+        print(f"--  Open Devin Web UI | href=https://app.devin.ai/settings/usage")
+
     # Active sessions — context-fill snapshot for /compact warnings
     try:
         sys.path.insert(0, str(SCRIPT.parent))
@@ -1175,12 +1309,21 @@ def main():
     print(f"--  Antigravity (antigravity.google) | {icon_antigravity}href=https://antigravity.google/docs")
     if grok_weekly is not None or os.path.exists(os.path.expanduser("~/.grok")):
         print(f"--  Grok (grok.com) | {icon_grok}href=https://grok.com")
+    if local_devin or os.path.exists(os.path.expanduser("~/.local/share/devin")):
+        print(f"--  Devin (app.devin.ai) | {icon_devin}href=https://app.devin.ai/settings/usage")
     print("---")
     age = int(time.time() - fetched_at)
     age_s = f"{age}s ago" if age < 60 else f"{age // 60}m ago"
     if estimated:
         print(f"Weekly is ~estimated from local tokens (Chrome unavailable) | {NOOP}")
     print(f"Updated {age_s}{' — STALE' if stale else ''} | {NOOP}")
+    print(f"Menu bar providers | size=13")
+    for pid, label in BAR_PROVIDERS:
+        checked = "checked=true " if pid not in bar_hidden else ""
+        print(f"--  {label} | shell={sys.executable} param1={SCRIPT} "
+              f"param2=--toggle-bar param3={pid} terminal=false refresh=true {checked}")
+    if all_hidden:
+        print(f"--  (all hidden — bar shows ⋯ so this menu stays reachable) | {NOOP}")
     print("Refresh now | refresh=true")
     print(f"Set pace start time… | shell={sys.executable} param1={SCRIPT} "
           f"param2=--set-start terminal=false refresh=true")

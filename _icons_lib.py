@@ -33,6 +33,7 @@ BRAND_COLORS = {
         "gemini": (220, 185, 255),      # Google Gemini bright lavender lilac (#DCB9FF)
         "antigravity": (220, 185, 255),
         "grok": (255, 255, 255),        # xAI crisp white
+        "devin": (255, 255, 255),       # Devin monochrome white
     },
     "light": {
         "claude": (196, 65, 30),        # Deep rich terracotta
@@ -41,6 +42,7 @@ BRAND_COLORS = {
         "gemini": (115, 45, 220),       # Deep rich purple
         "antigravity": (115, 45, 220),
         "grok": (25, 30, 40),           # Deep charcoal
+        "devin": (11, 16, 15),          # Devin near-black (#0B100F)
     },
 }
 
