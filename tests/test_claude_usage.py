@@ -354,6 +354,100 @@ class ClaudeUsageOutputTest(unittest.TestCase):
         # Real icon images attached to headers
         self.assertIn("image=", rendered)
 
+    def test_devin_section_renders(self):
+        plugin = load_plugin()
+        now = datetime.now(timezone.utc)
+        reset = now + timedelta(days=5)
+        ccc = {
+            "ok": True,
+            "fetched_at": now.isoformat(),
+            "claude": {
+                "five_hour": {"pct": 10.0, "resets_at": (now + timedelta(hours=4)).isoformat()},
+                "seven_day": {"pct": 20.0, "resets_at": reset.isoformat()},
+            },
+            "codex": {},
+        }
+        local_devin = {
+            "weekly": {"pct": 14.0, "resets_at": int(reset.timestamp()), "window_minutes": 10080},
+            "session": {"pct": 24.0, "resets_at": int((now + timedelta(hours=10)).timestamp()), "window_minutes": 1440},
+            "extra": {"overage_balance_micros": "8920935",
+                      "plan_start": "2026-09-07T01:46:36Z", "plan_end": "2026-10-07T01:46:36Z"},
+            "plan_type": "Pro",
+            "from_cache": False,
+        }
+        output = StringIO()
+        with (
+            mock.patch.object(plugin, "fetch_from_ccc", return_value=ccc),
+            mock.patch.object(plugin, "burn_shares_for_week", return_value=None),
+            mock.patch.dict(sys.modules, {"_devin_lib": SimpleNamespace(read_usage=lambda: local_devin)}),
+            redirect_stdout(output),
+        ):
+            plugin.main()
+
+        rendered = output.getvalue()
+        self.assertIn("⬢ 14%", rendered)
+        self.assertIn("Devin (Pro)", rendered)
+        self.assertIn("  14% used", rendered)
+        self.assertIn("Daily quota: 24% used", rendered)
+        self.assertIn("Overage balance: USD 8.92", rendered)
+        self.assertIn("Open Devin Web UI | href=https://app.devin.ai/settings/usage", rendered)
+
+    def test_bar_hidden_provider_filtered_from_headline_only(self):
+        plugin = load_plugin()
+        now = datetime.now(timezone.utc)
+        reset = now + timedelta(days=5)
+        ccc = {
+            "ok": True,
+            "fetched_at": now.isoformat(),
+            "claude": {
+                "five_hour": {"pct": 10.0, "resets_at": (now + timedelta(hours=4)).isoformat()},
+                "seven_day": {"pct": 20.0, "resets_at": reset.isoformat()},
+            },
+            "codex": {},
+        }
+        local_grok = {
+            "weekly": {"pct": 8.0, "resets_at": reset.isoformat()},
+            "session": None,
+            "extra": {},
+            "plan_type": "SuperGrok",
+            "from_cache": False,
+        }
+        output = StringIO()
+        with tempfile.TemporaryDirectory() as tmp:
+            hidden_p = Path(tmp) / "hidden.json"
+            hidden_p.write_text(json.dumps({"hidden": ["grok"]}))
+            with (
+                mock.patch.object(plugin, "fetch_from_ccc", return_value=ccc),
+                mock.patch.object(plugin, "burn_shares_for_week", return_value=None),
+                mock.patch.object(plugin, "BAR_HIDDEN_FILE", hidden_p),
+                mock.patch.dict(sys.modules, {"_grok_lib": SimpleNamespace(read_usage=lambda: local_grok)}),
+                redirect_stdout(output),
+            ):
+                plugin.main()
+
+        rendered = output.getvalue()
+        headline = rendered.splitlines()[0]
+        self.assertNotIn("𝕏", headline)
+        # Dropdown still shows the full Grok section
+        self.assertIn("Grok (SuperGrok)", rendered)
+        self.assertIn("  8% used", rendered)
+        # Toggle menu is rendered, Grok unchecked
+        self.assertIn("Menu bar providers", rendered)
+        self.assertIn("--toggle-bar param3=grok", rendered)
+
+    def test_cli_toggle_bar_roundtrip(self):
+        plugin = load_plugin()
+        with tempfile.TemporaryDirectory() as tmp:
+            hidden_p = Path(tmp) / "hidden.json"
+            with mock.patch.object(plugin, "BAR_HIDDEN_FILE", hidden_p):
+                self.assertEqual(plugin.load_bar_hidden(), set())
+                plugin.cli_toggle_bar("kimi")
+                self.assertEqual(plugin.load_bar_hidden(), {"kimi"})
+                plugin.cli_toggle_bar("kimi")
+                self.assertEqual(plugin.load_bar_hidden(), set())
+                plugin.cli_toggle_bar("not-a-provider")
+                self.assertEqual(plugin.load_bar_hidden(), set())
+
 
 if __name__ == "__main__":
     unittest.main()

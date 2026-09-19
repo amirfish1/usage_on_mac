@@ -2,7 +2,7 @@
 
 A pair of [xbar](https://xbarapp.com) plugins that sit in your macOS menu bar:
 
-- **`claude-usage.5m.py`** — shows your real Anthropic Pro/Max weekly usage %, 5-hour session %, and a pace indicator (are you on track to stay under limits this week?). Pulls live data straight from the same endpoint that powers [claude.ai/settings/usage](https://claude.ai/settings/usage). Also shows Codex, Kimi (Kimi Code CLI), Google Antigravity (agy CLI), and Grok (xAI Grok CLI) usage — weekly %, 5h session %, pace, and extra-usage balance — sourced locally from each CLI's own data (Codex rollout logs; Kimi's OAuth token calling the same `api.kimi.com/coding/v1/usages` endpoint its `/usage` command uses; Antigravity's JSON output calling `agy --print /usage`; Grok's local credits log at `~/.grok/logs/unified.jsonl`). Features real brand Retina icons for each provider in the dropdown and authentic brand symbols in the menu bar.
+- **`claude-usage.5m.py`** — shows your real Anthropic Pro/Max weekly usage %, 5-hour session %, and a pace indicator (are you on track to stay under limits this week?). Pulls live data straight from the same endpoint that powers [claude.ai/settings/usage](https://claude.ai/settings/usage). Also shows Codex, Kimi (Kimi Code CLI), Google Antigravity (agy CLI), Grok (xAI Grok CLI), and Devin (Cognition) usage — weekly %, 5h session %, pace, and extra-usage balance — sourced locally from each CLI's own data (Codex rollout logs; Kimi's OAuth token calling the same `api.kimi.com/coding/v1/usages` endpoint its `/usage` command uses; Antigravity's JSON output calling `agy --print /usage`; Grok's local credits log at `~/.grok/logs/unified.jsonl`; Devin Desktop's session token calling the same `GetUserStatus` endpoint the `devin` CLI uses, which reports weekly + daily quota percents and overage balance). Features real brand Retina icons for each provider in the dropdown and authentic brand symbols in the menu bar.
 - **`mac-health.1m.py`** — system load, memory pressure, zombie-process watchdog, and cleanup suggestions for heavy or leaked processes.
 
 ![screenshot showing menu bar with weekly % and dropdown with pace details](docs/screenshot.png)
@@ -11,7 +11,7 @@ A pair of [xbar](https://xbarapp.com) plugins that sit in your macOS menu bar:
 
 ## What you see
 
-**Menu bar headline:** `✳ 62%·69 ⬡ 99%·209 🌙 71%·215 ✦ 52%·170 ✦3P 0%·0 𝕏 8%·8`
+**Menu bar headline:** `✳ 62%·69 ⬡ 99%·209 🌙 71%·215 ✦ 52%·170 ✦3P 0%·0 𝕏 8%·8 ⬢ 14%·16`
 
 (xbar draws this as a Retina image with real brand icons; the line above is the text fallback, captured from a live `./claude-usage.5m.py` run.)
 
@@ -22,6 +22,7 @@ A pair of [xbar](https://xbarapp.com) plugins that sit in your macOS menu bar:
     - Kimi: ice cyan (`#7DD3FC`) / deep sky (`#0278BE`)
     - Antigravity / Gemini: lavender lilac (`#DCB9FF`) / deep purple (`#732DDC`)
     - Grok: white (`#FFFFFF`) / charcoal (`#191E28`)
+    - Devin: white (`#FFFFFF`) / near-black (`#0B100F`)
   - **Projected End-of-Week Pace %** is rendered in health status colors (dark / light):
     - 🟢 **Green** (`#4ADE80` / `#16A34A`): On pace (projected ≤ 100%)
     - 🟡 **Yellow** (`#FDE047` / `#CA8A04`): Warning (projected 100% – 110%)
@@ -77,6 +78,14 @@ Grok (SuperGrok)
   Extra usage balance: USD 10.00
   Open Grok Web UI
 
+Devin (Pro)
+  14% used · resets in 1d 4h
+  on pace — projected 16% by week end
+  expected 86% · Δ -72pp · Worked 78.0h · 13.0h left
+  Daily quota: 24% used · resets in 4h 46m
+  Overage balance: USD 8.92
+  Open Devin Web UI
+
 Active sessions: 23 · 7 need /compact
   🔴  99.5%  65m ago  ~/Apps-BYM
   🔴  94.2%  152m ago  ~/Apps-BYM
@@ -91,7 +100,10 @@ Active sessions: 23 · 7 need /compact
   Kimi (kimi.com)
   Antigravity (antigravity.google)
   Grok (grok.com)
+  Devin (app.devin.ai)
 ```
+
+**Show/hide providers in the top bar:** the "Menu bar providers" submenu at the bottom of the dropdown has a checkbox per provider. Unticking one removes it from the menu bar headline only — its dropdown section stays visible so you can still check details or re-enable it. Choices persist in `~/.cache/claude-usage-bar-hidden.json`.
 
 ---
 
@@ -170,7 +182,8 @@ WORK_DAYS_PER_WEEK = 7
 | `_kimi_lib.py` | Helper — Kimi (Kimi Code CLI) weekly/5h/extra usage via `~/.kimi-code` OAuth token + `api.kimi.com/coding/v1/usages` |
 | `_antigravity_lib.py` | Helper — Antigravity weekly/5h usage via `agy --print /usage --output-format json` |
 | `_grok_lib.py` | Helper — Grok (xAI Grok CLI) weekly usage via local `~/.grok/logs/unified.jsonl` credits config |
-| `_icons_lib.py` | Helper — provides real brand Retina icons (base64 PNG) for Claude, Codex, Kimi, Antigravity, and Grok |
+| `_devin_lib.py` | Helper — Devin weekly/daily quota + overage via `~/.local/share/devin` session token + `GetUserStatus` |
+| `_icons_lib.py` | Helper — provides real brand Retina icons (base64 PNG) for Claude, Codex, Kimi, Antigravity, Grok, and Devin |
 | `icons/` | Directory containing light/dark and 32x32 Retina PNG brand icons |
 | `ccc-context-fill.py` | CLI tool — same context-fill data as a table or JSON |
 | `mac-health.1m.py` | xbar plugin — system load, memory, zombie process watchdog, cleanup suggestions |
