@@ -163,14 +163,14 @@ class ClaudeUsageOutputTest(unittest.TestCase):
                 },
             },
             "codex": {
-                "weekly": {"pct": 2.0, "resets_at": reset.isoformat(), "window_minutes": 10080},
+                "weekly": {"pct": 95.0, "resets_at": (now - timedelta(hours=1)).isoformat(), "window_minutes": 10080},
                 "session": {"pct": 12.0, "resets_at": (now - timedelta(days=2)).isoformat(), "window_minutes": 300},
                 "pace": {"ok": True, "projected_pct": 7.0},
                 "plan_type": "prolite",
             },
         }
         local_codex = {
-            "weekly": {"pct": 7.0, "resets_at": int(reset.timestamp()), "window_minutes": 10080},
+            "weekly": {"pct": 4.0, "resets_at": int(reset.timestamp()), "window_minutes": 10080},
             "session": None,
             "plan_type": "prolite",
             "from_cache": False,
@@ -188,8 +188,8 @@ class ClaudeUsageOutputTest(unittest.TestCase):
 
         rendered = output.getvalue()
         self.assertIn("Codex (prolite)", rendered)
-        self.assertIn("  7% used", rendered)
-        self.assertNotIn("  2% used", rendered)
+        self.assertIn("  4% used", rendered)
+        self.assertNotIn("  95% used", rendered)
 
     def test_kimi_usage_section_renders(self):
         plugin = load_plugin()
@@ -235,6 +235,7 @@ class ClaudeUsageOutputTest(unittest.TestCase):
 
         with (
             mock.patch.object(plugin, "fetch_from_ccc", return_value=ccc),
+            mock.patch.object(plugin, "load_bar_hidden", return_value=set()),
             mock.patch.object(plugin, "burn_shares_for_week", return_value=None),
             mock.patch.dict(sys.modules, {"_codex_lib": fake_codex_module,
                                           "_kimi_lib": fake_kimi_module}),

@@ -496,7 +496,7 @@ def pace_for(weekly_pct, weekly_resets_at_iso):
 
 def codex_pace(weekly_pct, weekly_resets_epoch, window_minutes):
     """Codex pace: week-start is the reset instant minus the rate-limit window
-    (no manual override — Codex's % is always live from local logs)."""
+    (no manual override — Codex supplies the quota window)."""
     if weekly_pct is None or not weekly_resets_epoch:
         return None
     try:
@@ -764,6 +764,15 @@ def main():
     except Exception:
         local_codex = None
     ccc_codex = (ccc_usage.get("codex") or None) if ccc_usage else None
+    # A fresh Claude fetch does not make CCC's Codex snapshot current.
+    if ccc_codex:
+        try:
+            reset = (ccc_codex.get("weekly") or {}).get("resets_at")
+            reset_epoch = parse_iso(reset).timestamp() if isinstance(reset, str) else float(reset)
+            if reset_epoch <= time.time():
+                ccc_codex = None
+        except (TypeError, ValueError, AttributeError):
+            ccc_codex = None
     if local_codex and not local_codex.get("from_cache"):
         codex = local_codex
     else:
@@ -1136,7 +1145,7 @@ def main():
         if codex_session is not None:
             print(f"--  5h session: {codex_session:.0f}% used · resets in {fmt_reset_epoch(codex_session_reset)} | {NOOP}")
         if codex.get("from_cache"):
-            print(f"--  (showing last Codex snapshot — no recent activity) | {NOOP}")
+            print(f"--  (showing last Codex snapshot — live usage unavailable) | {NOOP}")
         print(f"--  Open Codex Web UI | href=https://chatgpt.com/codex/cloud/settings/analytics#usage")
 
     # Kimi Section

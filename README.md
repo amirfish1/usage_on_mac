@@ -2,7 +2,7 @@
 
 A pair of [xbar](https://xbarapp.com) plugins that sit in your macOS menu bar:
 
-- **`claude-usage.5m.py`** — shows your real Anthropic Pro/Max weekly usage %, 5-hour session %, and a pace indicator (are you on track to stay under limits this week?). Pulls live data straight from the same endpoint that powers [claude.ai/settings/usage](https://claude.ai/settings/usage). Also shows Codex, Kimi (Kimi Code CLI), Google Antigravity (agy CLI), Grok (xAI Grok CLI), and Devin (Cognition) usage — weekly %, 5h session %, pace, and extra-usage balance — sourced locally from each CLI's own data (Codex rollout logs; Kimi's OAuth token calling the same `api.kimi.com/coding/v1/usages` endpoint its `/usage` command uses; Antigravity's JSON output calling `agy --print /usage`; Grok's local credits log at `~/.grok/logs/unified.jsonl`; Devin Desktop's session token calling the same `GetUserStatus` endpoint the `devin` CLI uses, which reports weekly + daily quota percents and overage balance). Features real brand Retina icons for each provider in the dropdown and authentic brand symbols in the menu bar.
+- **`claude-usage.5m.py`** — shows your real Anthropic Pro/Max weekly usage %, 5-hour session %, and a pace indicator (are you on track to stay under limits this week?). Pulls live data straight from the same endpoint that powers [claude.ai/settings/usage](https://claude.ai/settings/usage). Also shows Codex, Kimi (Kimi Code CLI), Google Antigravity (agy CLI), Grok (xAI Grok CLI), and Devin (Cognition) usage — weekly %, 5h session %, pace, and extra-usage balance — sourced locally from each CLI's own data (Codex app-server rate limits, with rollout/cache fallback; Kimi's OAuth token calling the same `api.kimi.com/coding/v1/usages` endpoint its `/usage` command uses; Antigravity's JSON output calling `agy --print /usage`; Grok's local credits log at `~/.grok/logs/unified.jsonl`; Devin Desktop's session token calling the same `GetUserStatus` endpoint the `devin` CLI uses, which reports weekly + daily quota percents and overage balance). Features real brand Retina icons for each provider in the dropdown and authentic brand symbols in the menu bar.
 - **`mac-health.1m.py`** — system load, memory pressure, zombie-process watchdog, and cleanup suggestions for heavy or leaked processes.
 
 ![screenshot showing menu bar with weekly % and dropdown with pace details](docs/screenshot.png)
@@ -47,7 +47,7 @@ Codex (prolite)
   99% used · resets in 3d 19h
   BURNING FAST — projected 209% by week end
   expected 47% · Δ +52pp · Worked 43.1h · 47.9h left
-  (showing last Codex snapshot — no recent activity)
+  (showing last Codex snapshot — live usage unavailable)
   Open Codex Web UI
 
 Kimi (Advanced)
@@ -178,7 +178,7 @@ WORK_DAYS_PER_WEEK = 7
 | `claude-usage.5m.py` | Main xbar plugin — usage %, pace, active sessions |
 | `fetch-usage.applescript` | Fetches the usage JSON from an open Chrome/claude.ai tab |
 | `_session_lib.py` | Helper — reads local `~/.claude` transcripts to show context-fill per session |
-| `_codex_lib.py` | Helper — Codex weekly/5h usage from local `~/.codex` rollout logs |
+| `_codex_lib.py` | Helper — Codex weekly/5h usage via Codex app-server with local rollout/cache fallback |
 | `_kimi_lib.py` | Helper — Kimi (Kimi Code CLI) weekly/5h/extra usage via `~/.kimi-code` OAuth token + `api.kimi.com/coding/v1/usages` |
 | `_antigravity_lib.py` | Helper — Antigravity weekly/5h usage via `agy --print /usage --output-format json` |
 | `_grok_lib.py` | Helper — Grok (xAI Grok CLI) weekly usage via local `~/.grok/logs/unified.jsonl` credits config |
@@ -233,3 +233,32 @@ python3 ccc-context-fill.py --table --only-warning
 ## License
 
 MIT
+
+## Codex usage refresh and tests
+
+Codex usage is fetched on each refresh with the documented
+[`account/rateLimits/read`](https://developers.openai.com/codex/app-server)
+method over a short-lived `codex app-server --stdio` connection. This uses the
+CLI's existing sign-in; the plugin does not read credentials. The read is
+bounded to eight seconds and terminates its own child process group. It does
+not restart the desktop app or the app-server daemon.
+
+The `codex` bucket is selected from `rateLimitsByLimitId` when available.
+Weekly and session windows are identified by duration, regardless of whether
+they are primary or secondary. If the live read fails, the newest unexpired
+cache or rollout observation is used. Log observations older than 15 minutes
+and cached fallbacks are labelled in the dropdown; their observation times
+are retained. Expired windows are omitted, never guessed as zero.
+
+For xbar's minimal PATH, the reader also checks `~/.local/bin/codex`,
+`/opt/homebrew/bin/codex`, and `/usr/local/bin/codex`. Set `CODEX_USAGE_BIN`
+to override the executable, or `CODEX_USAGE_LIVE=0` for offline use. Setting
+`CODEX_SESSIONS_DIR` disables live reads by default for fixture-based runs;
+`CODEX_USAGE_LIVE=1` explicitly enables them. `CODEX_HOME` is respected.
+
+Run regression tests from the repository root:
+
+```sh
+python3 -m unittest tests.test_codex_lib -v
+CODEX_USAGE_LIVE=0 python3 -m unittest discover -s tests -v
+```
