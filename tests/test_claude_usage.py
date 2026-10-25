@@ -356,6 +356,42 @@ class ClaudeUsageOutputTest(unittest.TestCase):
         # Real icon images attached to headers
         self.assertIn("image=", rendered)
 
+    def test_antigravity_vertex_section_renders(self):
+        plugin = load_plugin()
+        now = datetime.now(timezone.utc)
+        ccc = {
+            "ok": True,
+            "fetched_at": now.isoformat(),
+            "claude": {"seven_day": {"pct": 20.0, "resets_at": (now + timedelta(days=5)).isoformat()}},
+            "codex": {},
+        }
+        local_antigravity = {
+            "billing": "vertex",
+            "gemini": {"weekly": {"pct": 64.0, "resets_at": None}},
+            "vertex": {"project": "test-project", "window_days": 7, "input_tokens": 61000000,
+                       "output_tokens": 500000, "est_cost_usd": 127.0, "weekly_budget_usd": 200.0},
+            "from_cache": False,
+        }
+        output = StringIO()
+        with (
+            mock.patch.object(plugin, "fetch_from_ccc", return_value=ccc),
+            mock.patch.object(plugin, "burn_shares_for_week", return_value=None),
+            mock.patch.object(plugin, "HAS_ICONS", False),
+            mock.patch.dict(sys.modules, {
+                "_antigravity_lib": SimpleNamespace(read_usage=lambda: local_antigravity),
+                "_grok_lib": SimpleNamespace(read_usage=lambda: None),
+            }),
+            redirect_stdout(output),
+        ):
+            plugin.main()
+        rendered = output.getvalue()
+        self.assertIn("✦ 64%", rendered)
+        self.assertNotIn("✦3P", rendered)
+        self.assertIn("Gemini Models (Vertex pay-as-you-go)", rendered)
+        self.assertIn("64% of $200 weekly budget", rendered)
+        self.assertIn("61.0M in", rendered)
+        self.assertIn("--set-gemini-budget", rendered)
+
     def test_devin_section_renders(self):
         plugin = load_plugin()
         now = datetime.now(timezone.utc)

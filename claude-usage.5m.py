@@ -524,14 +524,14 @@ def pace_verdict(proj, OK, WARN, BAD):
     return "warming up — not enough work hours yet", ""
 
 
-def _osascript_dialog(prompt, default_answer):
+def _osascript_dialog(prompt, default_answer, title="Claude Usage — pace start"):
     """Show a text-input dialog. Returns the entered text, or None if the user
     cancelled or anything went wrong."""
     try:
         proc = subprocess.run(
             ["osascript", "-e",
              f'display dialog {json.dumps(prompt)} default answer {json.dumps(default_answer)} '
-             f'with title "Claude Usage — pace start"'],
+             f'with title {json.dumps(title)}'],
             capture_output=True, text=True, timeout=180,
         )
     except Exception:
@@ -608,6 +608,40 @@ def cli_clear_start():
         pass
 
 
+def cli_set_gemini_budget():
+    """Prompt for the Gemini (Vertex pay-as-you-go) weekly budget in USD."""
+    try:
+        sys.path.insert(0, str(SCRIPT.parent))
+        import _antigravity_lib as agy
+    except Exception:
+        return
+    config = agy.read_config()
+    current = config.get("weekly_budget_usd")
+    prompt = ("Weekly Gemini budget in USD (Vertex pay-as-you-go).\n"
+              "The menu bar shows estimated 7-day spend as a % of this.\n"
+              "Leave empty to show dollars instead.")
+    ans = _osascript_dialog(prompt, f"{current:g}" if isinstance(current, (int, float)) else "",
+                            title="Claude Usage — Gemini budget")
+    if ans is None:
+        return  # cancelled
+    ans = ans.strip().lstrip("$").replace(",", "")
+    if not ans:
+        config.pop("weekly_budget_usd", None)
+    else:
+        try:
+            budget = float(ans)
+            if budget <= 0:
+                raise ValueError
+        except ValueError:
+            _osascript_alert(f"Couldn't parse '{ans}'. Enter a positive dollar amount, e.g. 150.")
+            return
+        config["weekly_budget_usd"] = budget
+    try:
+        agy.write_config(config)
+    except Exception as e:
+        _osascript_alert(f"Couldn't save budget: {e}")
+
+
 def load_bar_hidden():
     """Set of provider keys currently hidden from the menu bar headline."""
     try:
@@ -662,6 +696,9 @@ def main():
             return
         if sys.argv[1] == "--clear-start":
             cli_clear_start()
+            return
+        if sys.argv[1] == "--set-gemini-budget":
+            cli_set_gemini_budget()
             return
         if sys.argv[1] == "--toggle-bar" and len(sys.argv) > 2:
             cli_toggle_bar(sys.argv[2])
@@ -825,6 +862,8 @@ def main():
     agy_gemini_session = agy_gemini_session_reset = None
     agy_3p_weekly = agy_3p_weekly_reset = agy_3p_pace = None
     agy_3p_session = agy_3p_session_reset = None
+    # Vertex pay-as-you-go: rolling 7-day spend, no reset and no pace.
+    agy_vertex = (local_antigravity or {}).get("vertex")
     if local_antigravity:
         ag_gem = local_antigravity.get("gemini") or {}
         if ag_gem:
@@ -949,7 +988,20 @@ def main():
             "pace_pct": kimi_pace_d.get("projected_pct") if kimi_pace_d else None,
             "text": bar_segment_text(kimi_weekly, kimi_pace_d, kimi_weekly_reset),
         })
-    if agy_gemini_weekly is not None:
+    if agy_vertex:
+        v_cost_text = f"${agy_vertex['est_cost_usd']:.0f}"
+        segments.append({
+            "icon": "gemini",
+            "symbol": "✦",
+            "name": "Antigravity",
+            "provider": "antigravity",
+            "weekly_text": f"{agy_gemini_weekly:.0f}%" if agy_gemini_weekly is not None else v_cost_text,
+            "pace_text": None,
+            "weekly_pct": agy_gemini_weekly,
+            "pace_pct": None,
+            "text": f"{agy_gemini_weekly:.0f}%" if agy_gemini_weekly is not None else v_cost_text,
+        })
+    elif agy_gemini_weekly is not None:
         ag_pace_text = (
             f"{days_until(agy_gemini_weekly_reset)}d" if (agy_gemini_weekly >= 100 and days_until(agy_gemini_weekly_reset) is not None)
             else (f"{agy_gemini_pace['projected_pct']:.0f}" if (agy_gemini_pace and agy_gemini_pace["projected_pct"] is not None) else None)
@@ -1184,10 +1236,25 @@ def main():
         print(f"--  Open Kimi Web UI | href=https://www.kimi.com/membership/subscription?tab=quota")
 
     # Antigravity Section
-    if agy_gemini_weekly is not None or agy_3p_weekly is not None:
+    if agy_vertex or agy_gemini_weekly is not None or agy_3p_weekly is not None:
         print("---")
         print(f"Antigravity | {icon_antigravity}size=13")
-        if agy_gemini_weekly is not None:
+        if agy_vertex:
+            v = agy_vertex
+            budget = v.get("weekly_budget_usd")
+            print(f"--  Gemini Models (Vertex pay-as-you-go) | size=12 {NOOP}")
+            if budget:
+                v_color = OK if agy_gemini_weekly < 80 else (WARN if agy_gemini_weekly < 100 else BAD)
+                print(f"----  {agy_gemini_weekly:.0f}% of ${budget:,.0f} weekly budget · last {v['window_days']}d | size=12 {v_color} {NOOP}")
+                print(f"----  ${v['est_cost_usd']:,.2f} est. spend (max, ignores cache discount) | {NOOP}")
+            else:
+                print(f"----  ${v['est_cost_usd']:,.2f} est. spend · last {v['window_days']}d | size=12 {NOOP}")
+                print(f"----  No weekly budget set, so no % | {NOOP}")
+            print(f"----  {v['input_tokens'] / 1e6:,.1f}M in · {v['output_tokens'] / 1e6:,.2f}M out tokens | {NOOP}")
+            print(f"----  Project {v['project']} | {NOOP}")
+            print(f"----  Set weekly budget… | shell={sys.executable} param1={SCRIPT} "
+                  f"param2=--set-gemini-budget terminal=false refresh=true")
+        elif agy_gemini_weekly is not None:
             ag_status_color = BAD if (agy_gemini_weekly is not None and agy_gemini_weekly >= 100) else (pace_verdict(agy_gemini_pace["projected_pct"], OK, WARN, BAD)[1] if agy_gemini_pace else "")
             print(f"--  Gemini Models | size=12 {NOOP}")
             print(f"----  {agy_gemini_weekly:.0f}% used · resets in {fmt_reset(agy_gemini_weekly_reset)}" + (f" | size=12 {ag_status_color} {NOOP}" if ag_status_color else f" | size=12 {NOOP}"))

@@ -180,7 +180,7 @@ WORK_DAYS_PER_WEEK = 7
 | `_session_lib.py` | Helper — reads local `~/.claude` transcripts to show context-fill per session |
 | `_codex_lib.py` | Helper — Codex weekly/5h usage via Codex app-server with local rollout/cache fallback |
 | `_kimi_lib.py` | Helper — Kimi (Kimi Code CLI) weekly/5h/extra usage via `~/.kimi-code` OAuth token + `api.kimi.com/coding/v1/usages` |
-| `_antigravity_lib.py` | Helper — Antigravity weekly/5h usage via `agy --print /usage --output-format json` |
+| `_antigravity_lib.py` | Helper — Antigravity weekly/5h usage via `agy --print /usage --output-format json`; in Vertex pay-as-you-go mode (`gcp.project` in agy settings) reads 7-day Gemini tokens from Cloud Monitoring and shows est. spend as % of a weekly budget (`~/.config/usage_on_mac/antigravity.json`, set from the menu) |
 | `_grok_lib.py` | Helper — Grok (xAI Grok CLI) weekly usage via local `~/.grok/logs/unified.jsonl` credits config |
 | `_devin_lib.py` | Helper — Devin weekly/daily quota + overage via `~/.local/share/devin` session token + `GetUserStatus` |
 | `_icons_lib.py` | Helper — provides real brand Retina icons (base64 PNG) for Claude, Codex, Kimi, Antigravity, Grok, and Devin |
